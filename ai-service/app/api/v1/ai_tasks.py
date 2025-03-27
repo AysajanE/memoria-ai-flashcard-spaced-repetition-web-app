@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException, status
 from app.dependencies import validate_internal_api_key
 from app.schemas.ai_tasks import GenerateCardsRequest
 from app.config import settings
+from app.core.logic import generate_flashcards_from_text
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -17,33 +18,15 @@ async def process_card_generation(job_id: str, text: str, config: dict | None):
     logger.info(f"Starting card generation processing for jobId: {job_id}")
     
     try:
-        # Simulate AI processing time
-        time.sleep(random.randint(5, 15))
-        
-        # TODO: Implement actual AI call and result parsing here
-        # This is where we'll add the OpenAI/Anthropic API calls
-        
-        # Simulate random success/failure for now
-        if random.random() < 0.8:
-            status = "completed"
-            result_payload = {
-                "cards": [
-                    {"front": "Dummy Q1", "back": "Dummy A1", "type": "qa"},
-                    {"front": "Dummy Q2", "back": "Dummy A2", "type": "qa"}
-                ]
-            }
-            error_message = None
-        else:
-            status = "failed"
-            result_payload = None
-            error_message = "Simulated AI processing failure."
+        # Generate flashcards using AI
+        result_dict = await generate_flashcards_from_text(text)
         
         # Prepare webhook callback payload
         callback_payload = {
             "jobId": job_id,
-            "status": status,
-            "resultPayload": result_payload,
-            "errorMessage": error_message
+            "status": "completed",
+            "resultPayload": result_dict,
+            "errorMessage": None
         }
         
         # Send webhook callback
