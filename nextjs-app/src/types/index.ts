@@ -17,4 +17,19 @@ export interface Deck {
   userId: string;
   createdAt: Date;
   updatedAt: Date;
+}
+
+export interface Flashcard {
+  id: string;
+  deckId: string;
+  userId: string;
+  front: string;
+  back: string;
+  cardType: 'qa' | 'cloze';
+  srsLevel: number;
+  srsInterval: number;
+  srsEaseFactor: number;
+  srsDueDate: Date;
+  createdAt: Date;
+  updatedAt: Date;
 } 
