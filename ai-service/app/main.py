@@ -1,6 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.config import settings
+
 app = FastAPI(
     title="Memoria AI Service",
     description="AI service for Memoria flashcard generation",
@@ -18,4 +20,13 @@ app.add_middleware(
 
 @app.get("/")
 async def root():
-    return {"message": "Welcome to Memoria AI Service"} 
+    return {"message": "Welcome to Memoria AI Service"}
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint."""
+    return {"status": "ok"}
+
+# TODO: Include API routers here
+# from app.api.v1 import ai_tasks
+# app.include_router(ai_tasks.router, prefix="/api/v1") 
