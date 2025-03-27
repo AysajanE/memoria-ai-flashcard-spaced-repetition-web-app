@@ -3,9 +3,11 @@
 import { useEffect, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Flashcard } from "@/types";
-import { getDeckStudySessionAction } from "@/actions/study";
+import { getDeckStudySessionAction, recordStudyRatingAction } from "@/actions/study";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
+import { useRouter } from "next/navigation";
 
 export default function StudyPage({ params }: { params: { deckId: string } }) {
   const [deckName, setDeckName] = useState<string>("");
@@ -13,7 +15,9 @@ export default function StudyPage({ params }: { params: { deckId: string } }) {
   const [currentCardIndex, setCurrentCardIndex] = useState<number>(0);
   const [isShowingAnswer, setIsShowingAnswer] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isRating, setIsRating] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const router = useRouter();
 
   useEffect(() => {
     async function loadStudySession() {
@@ -25,6 +29,7 @@ export default function StudyPage({ params }: { params: { deckId: string } }) {
         
         if (!result.isSuccess) {
           setError(result.message);
+          toast.error(result.message || "Failed to load study session");
           return;
         }
 
@@ -34,6 +39,7 @@ export default function StudyPage({ params }: { params: { deckId: string } }) {
         setIsShowingAnswer(false);
       } catch (err) {
         setError("Failed to load study session");
+        toast.error("Failed to load study session");
         console.error(err);
       } finally {
         setIsLoading(false);
@@ -42,6 +48,34 @@ export default function StudyPage({ params }: { params: { deckId: string } }) {
 
     loadStudySession();
   }, [params.deckId]);
+
+  const handleRating = async (rating: "again" | "hard" | "good" | "easy") => {
+    if (!studyCards[currentCardIndex]) return;
+    
+    setIsRating(true);
+    try {
+      const result = await recordStudyRatingAction(studyCards[currentCardIndex].id, rating);
+      
+      if (!result.isSuccess) {
+        toast.error(result.message || "Failed to record rating");
+        return;
+      }
+
+      // Move to next card or end session
+      if (currentCardIndex < studyCards.length - 1) {
+        setCurrentCardIndex(prev => prev + 1);
+        setIsShowingAnswer(false);
+      } else {
+        toast.success("Study session completed!");
+        router.push("/decks");
+      }
+    } catch (err) {
+      toast.error("Failed to record rating");
+      console.error(err);
+    } finally {
+      setIsRating(false);
+    }
+  };
 
   if (isLoading) {
     return (
@@ -83,6 +117,7 @@ export default function StudyPage({ params }: { params: { deckId: string } }) {
             <Button 
               onClick={() => setIsShowingAnswer(true)}
               className="mb-4"
+              disabled={isRating}
             >
               Show Answer
             </Button>
@@ -95,25 +130,28 @@ export default function StudyPage({ params }: { params: { deckId: string } }) {
               <div className="flex gap-2 justify-center">
                 <Button 
                   variant="destructive"
-                  onClick={() => {/* TODO: handleRating */}}
+                  onClick={() => handleRating("again")}
+                  disabled={isRating}
                 >
                   Again
                 </Button>
                 <Button 
                   variant="secondary"
-                  onClick={() => {/* TODO: handleRating */}}
+                  onClick={() => handleRating("hard")}
+                  disabled={isRating}
                 >
                   Hard
                 </Button>
                 <Button 
-                  variant="default"
-                  onClick={() => {/* TODO: handleRating */}}
+                  onClick={() => handleRating("good")}
+                  disabled={isRating}
                 >
                   Good
                 </Button>
                 <Button 
                   variant="secondary"
-                  onClick={() => {/* TODO: handleRating */}}
+                  onClick={() => handleRating("easy")}
+                  disabled={isRating}
                 >
                   Easy
                 </Button>

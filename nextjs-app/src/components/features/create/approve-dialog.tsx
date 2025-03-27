@@ -22,6 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
+import { Loader2 } from "lucide-react";
 
 interface ApproveDialogProps {
   isOpen: boolean;
@@ -34,15 +35,22 @@ export function ApproveDialog({ isOpen, setIsOpen, onSubmit }: ApproveDialogProp
   const [selectedDeckId, setSelectedDeckId] = useState<string>();
   const [newDeckName, setNewDeckName] = useState("");
   const [isPending, startTransition] = useTransition();
+  const [isLoadingDecks, setIsLoadingDecks] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
+      setIsLoadingDecks(true);
       getDecksAction().then((result) => {
         if (result.isSuccess && result.data) {
           setDecks(result.data);
         } else {
-          toast.error("Failed to fetch decks");
+          toast.error(result.message || "Failed to fetch decks");
         }
+      }).catch((err) => {
+        toast.error("Failed to fetch decks");
+        console.error(err);
+      }).finally(() => {
+        setIsLoadingDecks(false);
       });
     }
   }, [isOpen]);
@@ -50,6 +58,11 @@ export function ApproveDialog({ isOpen, setIsOpen, onSubmit }: ApproveDialogProp
   const handleSubmit = () => {
     if (!selectedDeckId && !newDeckName) {
       toast.error("Please select a deck or create a new one");
+      return;
+    }
+
+    if (newDeckName && newDeckName.length < 3) {
+      toast.error("Deck name must be at least 3 characters long");
       return;
     }
 
@@ -77,9 +90,10 @@ export function ApproveDialog({ isOpen, setIsOpen, onSubmit }: ApproveDialogProp
                 setSelectedDeckId(value);
                 setNewDeckName("");
               }}
+              disabled={isLoadingDecks || isPending}
             >
               <SelectTrigger id="deck-select">
-                <SelectValue placeholder="Select existing deck..." />
+                <SelectValue placeholder={isLoadingDecks ? "Loading decks..." : "Select existing deck..."} />
               </SelectTrigger>
               <SelectContent>
                 {decks.map((deck) => (
@@ -100,15 +114,23 @@ export function ApproveDialog({ isOpen, setIsOpen, onSubmit }: ApproveDialogProp
                 setNewDeckName(e.target.value);
                 setSelectedDeckId(undefined);
               }}
+              disabled={isPending}
             />
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => setIsOpen(false)}>
-            Cancel
-          </Button>
-          <Button onClick={handleSubmit} disabled={isPending}>
-            {isPending ? "Processing..." : "Approve & Add"}
+          <Button
+            onClick={handleSubmit}
+            disabled={isPending || (!selectedDeckId && !newDeckName)}
+          >
+            {isPending ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Processing...
+              </>
+            ) : (
+              "Approve & Save"
+            )}
           </Button>
         </DialogFooter>
       </DialogContent>
