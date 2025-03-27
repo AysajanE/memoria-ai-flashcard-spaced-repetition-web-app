@@ -9,4 +9,12 @@ export interface FlashcardData {
   front: string;
   back: string;
   type?: 'qa' | 'cloze';
+}
+
+export interface Deck {
+  id: string;
+  name: string;
+  userId: string;
+  createdAt: Date;
+  updatedAt: Date;
 } 

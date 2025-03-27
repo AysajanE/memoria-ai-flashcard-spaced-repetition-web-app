@@ -77,4 +77,38 @@ export async function submitTextForCardsAction(
 
   // Redirect to job status page
   redirect(`/create/${jobId}`);
+}
+
+export async function reviewCardsAction(
+  jobId: string,
+  reviewedCardsData: FlashcardData[],
+  targetDeck: { id?: string; name?: string }
+): Promise<ActionState> {
+  try {
+    const { userId } = auth();
+    if (!userId) {
+      return {
+        isSuccess: false,
+        message: "Unauthorized",
+      };
+    }
+
+    // TODO: Implement actual card review logic
+    console.log("Reviewing cards:", {
+      jobId,
+      reviewedCardsData,
+      targetDeck,
+    });
+
+    return {
+      isSuccess: true,
+      message: "Cards approved (stub).",
+    };
+  } catch (error) {
+    console.error("Error reviewing cards:", error);
+    return {
+      isSuccess: false,
+      message: "Failed to review cards",
+    };
+  }
 } 

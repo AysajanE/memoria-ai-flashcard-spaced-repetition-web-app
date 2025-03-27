@@ -7,6 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Loader2 } from "lucide-react";
 import { JobStatus, FlashcardData } from "@/types";
 import { cn } from "@/lib/utils";
+import { ApproveDialog } from "@/components/features/create/approve-dialog";
+import { reviewCardsAction } from "@/actions/ai";
+import { toast } from "sonner";
 
 export default function JobStatusPage() {
   const params = useParams();
@@ -17,6 +20,7 @@ export default function JobStatusPage() {
     errorMessage?: string | null;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isApproveDialogOpen, setIsApproveDialogOpen] = useState(false);
 
   useEffect(() => {
     const fetchJobStatus = async () => {
@@ -44,6 +48,22 @@ export default function JobStatusPage() {
 
     return () => clearInterval(interval);
   }, [jobId, job?.status]);
+
+  const handleApproveSubmit = async (targetDeck: { id?: string; name?: string }) => {
+    if (!job?.resultPayload?.cards) {
+      toast.error("No cards to approve");
+      return;
+    }
+
+    const result = await reviewCardsAction(jobId, job.resultPayload.cards, targetDeck);
+    
+    if (result.isSuccess) {
+      toast.success(result.message);
+      // TODO: Redirect to decks page or show success state
+    } else {
+      toast.error(result.message || "Failed to approve cards");
+    }
+  };
 
   if (error) {
     return (
@@ -100,7 +120,12 @@ export default function JobStatusPage() {
           {/* Success State */}
           {job.status === "completed" && job.resultPayload?.cards && (
             <div className="space-y-6">
-              <h2 className="text-xl font-semibold">Generated Cards</h2>
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-semibold">Generated Cards</h2>
+                <Button onClick={() => setIsApproveDialogOpen(true)}>
+                  Approve & Assign Cards
+                </Button>
+              </div>
               <div className="grid gap-4">
                 {job.resultPayload.cards.map((card, index) => (
                   <Card key={index} className="p-4">
@@ -122,7 +147,6 @@ export default function JobStatusPage() {
                   </Card>
                 ))}
               </div>
-              {/* TODO: Add Review Interface components here */}
             </div>
           )}
 
@@ -159,6 +183,12 @@ export default function JobStatusPage() {
           )}
         </div>
       </Card>
+
+      <ApproveDialog
+        isOpen={isApproveDialogOpen}
+        setIsOpen={setIsApproveDialogOpen}
+        onSubmit={handleApproveSubmit}
+      />
     </div>
   );
 } 
