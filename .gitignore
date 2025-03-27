@@ -97,4 +97,5 @@ celerybeat-schedule
 celerybeat.pid
 
 # Docker related (sometimes ignored, sometimes not)
-# docker-compose.override.yml
+# docker-compose.override.ymlnode_modules/
+node_modules

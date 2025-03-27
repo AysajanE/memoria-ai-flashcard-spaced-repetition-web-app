@@ -1,4 +1,5 @@
 import { pgTable, text, uuid, jsonb, timestamp, pgEnum, index } from 'drizzle-orm/pg-core';
+import { users } from './users';
 
 export const jobTypeEnum = pgEnum('job_type', ['generate-cards']);
 export const jobStatusEnum = pgEnum('job_status', ['pending', 'processing', 'completed', 'failed']);

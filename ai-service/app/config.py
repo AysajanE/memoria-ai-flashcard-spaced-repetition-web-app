@@ -1,4 +1,5 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing import List
 
 
 class Settings(BaseSettings):
@@ -12,6 +13,9 @@ class Settings(BaseSettings):
     INTERNAL_API_KEY: str
     NEXTJS_APP_STATUS_WEBHOOK_URL: str
     
+    # CORS Settings
+    CORS_ORIGINS: List[str] = ["*"]
+    
     # AI Provider API Keys
     OPENAI_API_KEY: str = ""
     ANTHROPIC_API_KEY: str = ""
@@ -19,6 +23,10 @@ class Settings(BaseSettings):
     # AI Model Names
     OPENAI_MODEL_NAME: str = "gpt-3.5-turbo"
     ANTHROPIC_MODEL_NAME: str = "claude-3-haiku-20240307"
+    
+    # Token Limits
+    MAX_INPUT_TOKENS: int = 4000
+    MAX_OUTPUT_TOKENS: int = 2000
     
     # Default System Prompt
     DEFAULT_SYSTEM_PROMPT: str = """You are an expert study assistant. Your task is to generate high-quality flashcards from the provided text. Create a mix of Question/Answer (QA) and Cloze Deletion (Fill-in-the-blank) cards.

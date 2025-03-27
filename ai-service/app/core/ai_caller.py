@@ -3,14 +3,13 @@ import asyncio
 from typing import Optional
 
 import openai
-from openai import (
-    APITimeoutError,
-    RateLimitError,
-    APIConnectionError,
-    AuthenticationError,
-    InvalidRequestError,
-    APIError
-)
+from openai import AsyncOpenAI
+from openai.types.error import Timeout as APITimeoutError
+from openai.types.error import RateLimitError
+from openai.types.error import APIConnectionError
+from openai.types.error import AuthenticationError
+from openai.types.error import BadRequestError as InvalidRequestError
+from openai.types.error import APIError
 
 from app.config import settings
 
@@ -30,7 +29,7 @@ class AIServiceError(AIError):
 
 # Initialize OpenAI client
 try:
-    client = openai.AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 except Exception as e:
     logger.error(f"Failed to initialize OpenAI client: {str(e)}")
     raise AIServiceError(f"Failed to initialize AI client: {str(e)}")
