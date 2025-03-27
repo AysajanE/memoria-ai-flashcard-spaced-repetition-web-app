@@ -2,7 +2,7 @@
 
 import { auth } from "@clerk/nextjs";
 import { db } from "@/db";
-import { flashcards, decks } from "@/db/schema";
+import { flashcards, decks, users } from "@/db/schema";
 import { ActionState } from "@/types";
 import { eq, and, lte, asc } from "drizzle-orm";
 import { calculateSrsData, type StudyRating } from "@/lib/srs";
@@ -113,22 +113,81 @@ export async function recordStudyRatingAction(
       rating
     );
 
-    // Update database
-    await db
-      .update(flashcards)
-      .set({
-        srsInterval: newInterval,
-        srsEaseFactor: newEaseFactor,
-        srsDueDate: newDueDate,
-        updatedAt: new Date()
-      })
-      .where(eq(flashcards.id, flashcardId));
+    // Get current user stats
+    const [user] = await db
+      .select()
+      .from(users)
+      .where(eq(users.id, userId));
 
-    // TODO: Update user stats in users table
-    // - Increment daily study count
-    // - Update accuracy based on rating
-    // - Update streak if applicable
-    // - Update lastStudiedAt
+    if (!user) {
+      return {
+        isSuccess: false,
+        message: "User not found."
+      };
+    }
+
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const lastStudiedDate = user.lastStudiedAt ? new Date(user.lastStudiedAt) : null;
+    const lastStudiedDay = lastStudiedDate ? new Date(lastStudiedDate.getFullYear(), lastStudiedDate.getMonth(), lastStudiedDate.getDate()) : null;
+
+    // Calculate streak
+    let newStreak = user.consecutiveStudyDays;
+    if (!lastStudiedDay) {
+      newStreak = 1;
+    } else if (lastStudiedDay.getTime() === today.getTime()) {
+      // Already studied today, streak remains the same
+    } else if (lastStudiedDay.getTime() === today.getTime() - 24 * 60 * 60 * 1000) {
+      // Studied yesterday, increment streak
+      newStreak += 1;
+    } else {
+      // Break in streak, reset to 1
+      newStreak = 1;
+    }
+
+    // Reset daily count if it's a new day
+    const dailyCount = lastStudiedDay?.getTime() === today.getTime() 
+      ? user.dailyStudyCount + 1 
+      : 1;
+
+    // Reset weekly count if it's a new week
+    const weekStart = new Date(today);
+    weekStart.setDate(today.getDate() - today.getDay());
+    const lastWeekStart = lastStudiedDate ? new Date(lastStudiedDate.getFullYear(), lastStudiedDate.getMonth(), lastStudiedDate.getDate() - lastStudiedDate.getDay()) : null;
+    const weeklyCount = lastWeekStart?.getTime() === weekStart.getTime()
+      ? user.weeklyStudyCount + 1
+      : 1;
+
+    // Update accuracy (Good/Easy ratings count as correct)
+    const isCorrect = rating === 'Good' || rating === 'Easy';
+    const newAccuracy = ((Number(user.totalRecallAccuracy) * user.dailyStudyCount) + (isCorrect ? 1 : 0)) / (user.dailyStudyCount + 1);
+
+    // Update database in a transaction
+    await db.transaction(async (tx) => {
+      // Update flashcard
+      await tx
+        .update(flashcards)
+        .set({
+          srsInterval: newInterval,
+          srsEaseFactor: newEaseFactor,
+          srsDueDate: newDueDate,
+          updatedAt: now
+        })
+        .where(eq(flashcards.id, flashcardId));
+
+      // Update user stats
+      await tx
+        .update(users)
+        .set({
+          dailyStudyCount: dailyCount,
+          weeklyStudyCount: weeklyCount,
+          totalRecallAccuracy: newAccuracy.toFixed(2),
+          consecutiveStudyDays: newStreak,
+          lastStudiedAt: now,
+          updatedAt: now
+        })
+        .where(eq(users.id, userId));
+    });
 
     return {
       isSuccess: true,
