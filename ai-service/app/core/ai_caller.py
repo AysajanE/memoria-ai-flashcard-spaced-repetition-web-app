@@ -1,4 +1,5 @@
 import logging
+import asyncio
 from typing import Optional
 
 import openai
@@ -32,7 +33,7 @@ try:
     client = openai.AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 except Exception as e:
     logger.error(f"Failed to initialize OpenAI client: {str(e)}")
-    raise
+    raise AIServiceError(f"Failed to initialize AI client: {str(e)}")
 
 async def generate_cards_with_ai(
     text: str,

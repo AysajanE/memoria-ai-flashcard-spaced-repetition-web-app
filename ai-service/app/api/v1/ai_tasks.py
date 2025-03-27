@@ -1,14 +1,11 @@
 import logging
 import time
-import random
-import requests
+from typing import Dict, Any
 from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException, status
 from app.dependencies import validate_internal_api_key
 from app.schemas.ai_tasks import GenerateCardsRequest
-from app.config import settings
-from app.core.logic import generate_flashcards_from_text
+from app.core.logic import process_card_generation
 from app.core.ai_caller import TokenLimitError, AIServiceError
-from app.schemas.webhook import WebhookPayload
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -24,60 +21,50 @@ async def process_ai_job(job_id: str, input_data: Dict[str, Any]) -> None:
         input_data: Dictionary containing job input data
     """
     try:
-        # Extract input text
+        # Extract input text and model
         text = input_data.get("text")
+        model = input_data.get("config", {}).get("model", "gpt-3.5-turbo")
+        
         if not text:
             raise ValueError("No text provided in input data")
             
-        # Generate flashcards
-        result = await generate_flashcards_from_text(text)
-        
-        # Prepare success webhook payload
-        webhook_payload = WebhookPayload(
+        # Process card generation
+        await process_card_generation(
             job_id=job_id,
-            status="completed",
-            result_payload=result
+            input_text=text,
+            model=model,
+            start_time=time.time()
         )
         
-        # TODO: Send webhook to Next.js app
-        # await send_webhook(webhook_payload)
         logger.info(f"Successfully processed job {job_id}")
         
     except TokenLimitError as e:
         logger.error(f"Token limit error for job {job_id}: {str(e)}")
-        webhook_payload = WebhookPayload(
-            job_id=job_id,
-            status="failed",
-            error_message=f"Input text exceeds token limit: {str(e)}"
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
         )
-        # await send_webhook(webhook_payload)
         
     except AIServiceError as e:
         logger.error(f"AI service error for job {job_id}: {str(e)}")
-        webhook_payload = WebhookPayload(
-            job_id=job_id,
-            status="failed",
-            error_message=f"AI service error: {str(e)}"
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
         )
-        # await send_webhook(webhook_payload)
         
     except ValueError as e:
         logger.error(f"Validation error for job {job_id}: {str(e)}")
-        webhook_payload = WebhookPayload(
-            job_id=job_id,
-            status="failed",
-            error_message=f"Invalid input: {str(e)}"
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
         )
-        # await send_webhook(webhook_payload)
         
     except Exception as e:
         logger.error(f"Unexpected error processing job {job_id}: {str(e)}")
-        webhook_payload = WebhookPayload(
-            job_id=job_id,
-            status="failed",
-            error_message=f"Unexpected error: {str(e)}"
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An unexpected error occurred"
         )
-        # await send_webhook(webhook_payload)
 
 @router.post(
     "/generate-cards",

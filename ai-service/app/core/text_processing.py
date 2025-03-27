@@ -28,16 +28,15 @@ def count_tokens(text: str, model_name: str) -> int:
 
 def chunk_text(text: str, max_tokens_per_chunk: int, model_name: str) -> List[str]:
     """
-    Split text into chunks that are within the token limit for the given model.
-    Uses paragraph breaks as chunk boundaries where possible.
+    Split text into chunks that fit within token limits.
     
     Args:
         text: The input text to chunk
-        max_tokens_per_chunk: Maximum tokens allowed per chunk
+        max_tokens_per_chunk: Maximum tokens per chunk
         model_name: The name of the model to use for tokenization
         
     Returns:
-        List[str]: List of text chunks, each within the token limit
+        List[str]: List of text chunks
         
     Raises:
         ValueError: If text is empty or chunking fails
@@ -46,11 +45,12 @@ def chunk_text(text: str, max_tokens_per_chunk: int, model_name: str) -> List[st
         raise ValueError("Input text cannot be empty")
         
     try:
-        # Split text into paragraphs
-        paragraphs = [p.strip() for p in text.split('\n\n') if p.strip()]
         chunks = []
         current_chunk = []
         current_tokens = 0
+        
+        # Split text into paragraphs
+        paragraphs = [p.strip() for p in text.split('\n\n') if p.strip()]
         
         for paragraph in paragraphs:
             paragraph_tokens = count_tokens(paragraph, model_name)
