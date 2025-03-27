@@ -1,0 +1,9 @@
+fastapi==0.110.2
+uvicorn[standard]==0.29.0
+python-dotenv==1.0.1
+pydantic-settings==2.2.1
+requests==2.31.0
+# Placeholder for AI libs - will add later
+# openai
+# anthropic
+# tiktoken 
