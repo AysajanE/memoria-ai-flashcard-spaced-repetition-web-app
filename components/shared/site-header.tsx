@@ -1,6 +1,7 @@
 "use client"
 
 import Link from "next/link"
+import { UserButton } from "@clerk/nextjs"
 
 export function SiteHeader() {
   return (
@@ -12,9 +13,14 @@ export function SiteHeader() {
           </Link>
         </div>
         <div className="flex flex-1 items-center justify-between space-x-2 md:justify-end">
-          <nav className="flex items-center">
-            {/* TODO: Add navigation items */}
-            {/* TODO: Add UserButton from Clerk */}
+          <nav className="flex items-center space-x-6">
+            <Link
+              href="/articles"
+              className="text-sm font-medium transition-colors hover:text-primary"
+            >
+              Articles
+            </Link>
+            <UserButton afterSignOutUrl="/" />
           </nav>
         </div>
       </div>

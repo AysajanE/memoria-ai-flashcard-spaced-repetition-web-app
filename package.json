@@ -2,8 +2,11 @@
   "dependencies": {
     "@neondatabase/serverless": "^1.0.0",
     "drizzle-orm": "^0.41.0",
+    "gray-matter": "^4.0.3",
     "next-themes": "^0.4.6",
     "postgres": "^3.4.5",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
     "sonner": "^2.0.2"
   },
   "devDependencies": {
