@@ -3,7 +3,8 @@ import logging
 from typing import Dict, List
 
 from app.config import settings
-from app.core.ai_caller import generate_cards_with_ai
+from app.core.ai_caller import generate_cards_with_ai, TokenLimitError, AIServiceError
+from app.core.text_processing import count_tokens, chunk_text
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,9 @@ Example Cloze: {"front": "The Treaty of Versailles officially ended {{c1::World 
 
 Generate the JSON list now based on the user's text."""
 
+# Maximum tokens for input text (leaving room for system prompt and response)
+MAX_INPUT_TOKENS = 3000
+
 async def generate_flashcards_from_text(text: str) -> Dict[str, List[Dict[str, str]]]:
     """
     Generate flashcards from input text using AI.
@@ -35,39 +39,70 @@ async def generate_flashcards_from_text(text: str) -> Dict[str, List[Dict[str, s
         
     Raises:
         ValueError: If text is empty or invalid
+        TokenLimitError: If text exceeds model's token limit
+        AIServiceError: For AI service errors
         json.JSONDecodeError: If AI response is not valid JSON
-        Exception: For other errors during generation
     """
     if not text or len(text.strip()) == 0:
         raise ValueError("Input text cannot be empty")
         
     try:
-        # Generate cards using AI
-        raw_response = await generate_cards_with_ai(
-            text=text,
-            model_name=settings.OPENAI_MODEL_NAME,
-            system_prompt=CARD_GENERATION_SYSTEM_PROMPT
-        )
+        # Check token count
+        token_count = count_tokens(text, settings.OPENAI_MODEL_NAME)
         
-        # Parse the JSON response
-        try:
-            cards = json.loads(raw_response)
-            if not isinstance(cards, list):
-                raise ValueError("AI response must be a JSON array")
+        if token_count > MAX_INPUT_TOKENS:
+            # Split text into chunks and process each
+            chunks = chunk_text(text, MAX_INPUT_TOKENS, settings.OPENAI_MODEL_NAME)
+            all_cards = []
+            
+            for chunk in chunks:
+                chunk_response = await generate_cards_with_ai(
+                    text=chunk,
+                    model_name=settings.OPENAI_MODEL_NAME,
+                    system_prompt=CARD_GENERATION_SYSTEM_PROMPT
+                )
                 
-            # Validate each card has required fields
-            for card in cards:
-                if not all(key in card for key in ["front", "back", "type"]):
-                    raise ValueError("Each card must have 'front', 'back', and 'type' fields")
-                if card["type"] not in ["qa", "cloze"]:
-                    raise ValueError("Card type must be either 'qa' or 'cloze'")
-                    
-            return {"cards": cards}
+                try:
+                    chunk_cards = json.loads(chunk_response)
+                    if isinstance(chunk_cards, list):
+                        all_cards.extend(chunk_cards)
+                except json.JSONDecodeError as e:
+                    logger.error(f"Failed to parse chunk response as JSON: {str(e)}")
+                    logger.error(f"Raw chunk response: {chunk_response}")
+                    raise ValueError("AI response was not valid JSON")
             
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse AI response as JSON: {str(e)}")
-            raise ValueError("AI response was not valid JSON")
+            cards = all_cards
+        else:
+            # Process entire text at once
+            raw_response = await generate_cards_with_ai(
+                text=text,
+                model_name=settings.OPENAI_MODEL_NAME,
+                system_prompt=CARD_GENERATION_SYSTEM_PROMPT
+            )
             
+            try:
+                cards = json.loads(raw_response)
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse AI response as JSON: {str(e)}")
+                logger.error(f"Raw AI response: {raw_response}")
+                raise ValueError("AI response was not valid JSON")
+        
+        # Validate card structure
+        if not isinstance(cards, list):
+            raise ValueError("AI response must be a JSON array")
+            
+        # Validate each card has required fields
+        for card in cards:
+            if not all(key in card for key in ["front", "back", "type"]):
+                raise ValueError("Each card must have 'front', 'back', and 'type' fields")
+            if card["type"] not in ["qa", "cloze"]:
+                raise ValueError("Card type must be either 'qa' or 'cloze'")
+                
+        return {"cards": cards}
+        
+    except (TokenLimitError, AIServiceError) as e:
+        logger.error(f"AI service error: {str(e)}")
+        raise
     except Exception as e:
-        logger.error(f"Error generating flashcards: {str(e)}")
-        raise 
+        logger.error(f"Unexpected error generating flashcards: {str(e)}")
+        raise ValueError(f"Failed to generate flashcards: {str(e)}") 

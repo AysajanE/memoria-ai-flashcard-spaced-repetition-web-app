@@ -7,76 +7,77 @@ from app.dependencies import validate_internal_api_key
 from app.schemas.ai_tasks import GenerateCardsRequest
 from app.config import settings
 from app.core.logic import generate_flashcards_from_text
+from app.core.ai_caller import TokenLimitError, AIServiceError
+from app.schemas.webhook import WebhookPayload
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-async def process_card_generation(job_id: str, text: str, config: dict | None):
-    """Process card generation in the background and send status update via webhook."""
-    logger.info(f"Starting card generation processing for jobId: {job_id}")
+async def process_ai_job(job_id: str, input_data: Dict[str, Any]) -> None:
+    """
+    Process an AI job in the background and send results via webhook.
     
+    Args:
+        job_id: Unique identifier for the job
+        input_data: Dictionary containing job input data
+    """
     try:
-        # Generate flashcards using AI
-        result_dict = await generate_flashcards_from_text(text)
+        # Extract input text
+        text = input_data.get("text")
+        if not text:
+            raise ValueError("No text provided in input data")
+            
+        # Generate flashcards
+        result = await generate_flashcards_from_text(text)
         
-        # Prepare webhook callback payload
-        callback_payload = {
-            "jobId": job_id,
-            "status": "completed",
-            "resultPayload": result_dict,
-            "errorMessage": None
-        }
+        # Prepare success webhook payload
+        webhook_payload = WebhookPayload(
+            job_id=job_id,
+            status="completed",
+            result_payload=result
+        )
         
-        # Send webhook callback
-        try:
-            headers = {
-                "Content-Type": "application/json",
-                "X-Internal-Api-Key": settings.INTERNAL_API_KEY
-            }
-            
-            response = requests.post(
-                settings.NEXTJS_APP_STATUS_WEBHOOK_URL,
-                json=callback_payload,
-                headers=headers,
-                timeout=10
-            )
-            
-            if response.status_code == 200:
-                logger.info(f"Successfully sent webhook callback for jobId: {job_id}")
-            else:
-                logger.error(
-                    f"Failed to send webhook callback for jobId: {job_id}. "
-                    f"Status code: {response.status_code}, Response: {response.text}"
-                )
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Error sending webhook callback for jobId: {job_id}. Error: {str(e)}")
-            
+        # TODO: Send webhook to Next.js app
+        # await send_webhook(webhook_payload)
+        logger.info(f"Successfully processed job {job_id}")
+        
+    except TokenLimitError as e:
+        logger.error(f"Token limit error for job {job_id}: {str(e)}")
+        webhook_payload = WebhookPayload(
+            job_id=job_id,
+            status="failed",
+            error_message=f"Input text exceeds token limit: {str(e)}"
+        )
+        # await send_webhook(webhook_payload)
+        
+    except AIServiceError as e:
+        logger.error(f"AI service error for job {job_id}: {str(e)}")
+        webhook_payload = WebhookPayload(
+            job_id=job_id,
+            status="failed",
+            error_message=f"AI service error: {str(e)}"
+        )
+        # await send_webhook(webhook_payload)
+        
+    except ValueError as e:
+        logger.error(f"Validation error for job {job_id}: {str(e)}")
+        webhook_payload = WebhookPayload(
+            job_id=job_id,
+            status="failed",
+            error_message=f"Invalid input: {str(e)}"
+        )
+        # await send_webhook(webhook_payload)
+        
     except Exception as e:
-        logger.error(f"Error processing card generation for jobId: {job_id}. Error: {str(e)}")
-        # Try to send failure webhook
-        try:
-            callback_payload = {
-                "jobId": job_id,
-                "status": "failed",
-                "resultPayload": None,
-                "errorMessage": f"Internal processing error: {str(e)}"
-            }
-            headers = {
-                "Content-Type": "application/json",
-                "X-Internal-Api-Key": settings.INTERNAL_API_KEY
-            }
-            requests.post(
-                settings.NEXTJS_APP_STATUS_WEBHOOK_URL,
-                json=callback_payload,
-                headers=headers,
-                timeout=10
-            )
-        except Exception as webhook_error:
-            logger.error(f"Failed to send error webhook for jobId: {job_id}. Error: {str(webhook_error)}")
-    
-    logger.info(f"Completed card generation processing for jobId: {job_id}")
+        logger.error(f"Unexpected error processing job {job_id}: {str(e)}")
+        webhook_payload = WebhookPayload(
+            job_id=job_id,
+            status="failed",
+            error_message=f"Unexpected error: {str(e)}"
+        )
+        # await send_webhook(webhook_payload)
 
 @router.post(
     "/generate-cards",
@@ -90,10 +91,12 @@ async def trigger_generate_cards(request: GenerateCardsRequest, background_tasks
     
     # Add background task for card generation
     background_tasks.add_task(
-        process_card_generation,
+        process_ai_job,
         request.jobId,
-        request.text,
-        request.config
+        {
+            "text": request.text,
+            "config": request.config
+        }
     )
     
     return {
