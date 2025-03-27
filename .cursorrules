@@ -1,0 +1,323 @@
+# Memoria,a Spaced Repetition Web App - Specification and Guidelines
+
+## 1. Project Instructions
+
+* Use this specification and the guidelines herein as you build the Memoria web application.
+* **Completeness:** Write the complete code required for each step or feature requested. Ensure all necessary imports, configurations, and logic for both the Next.js application and the Python AI Service are included.
+* **Goal:** Your primary objective is to fully implement the Memoria web app features according to these guidelines, focusing on a clean UI, robust AI integration, reliable payment/usage limit handling, and adherence to best practices.
+* **Context Tags:** You may encounter context tags (e.g., `<memoria-workflow-step>`) in descriptions. Use these tags to better understand the purpose and context of the code you are working with or generating.
+* **Adherence:** Follow the rules and conventions outlined in this document strictly.
+
+## 2. Overview
+
+This document outlines the specifications and guidelines for developing the **Memoria**, a web application designed to help users transform learning materials (text or uploaded documents) into effective spaced repetition flashcards using AI-powered summarization and prompt generation. It defines the technology stack (Next.js frontend/backend + Python AI microservice), project structure, coding conventions, and best practices.
+
+**Core Features:** Multi-step card creation workflow, AI model selection (OpenAI/Anthropic), text/file input, AI summarization, AI flashcard generation (Q&A, Cloze), interactive editing, Anki export formatting, user accounts with authentication.
+
+**Extended Features:** Subscription tiers with AI usage limits based on membership, Stripe integration for payments, document storage, processing job status tracking.
+
+## 3. Phasing & MVP Scope
+
+To manage development effectively, the project should be approached in phases.
+
+* **Phase 1 (MVP - Core Functionality):**
+    * User Authentication (Clerk setup).
+    * Basic multi-step workflow (Input -> Submit -> View Raw AI Output -> Format/Download).
+    * Text input processing via AI service (Summarization OR Prompt Generation - choose one initially).
+    * Direct interaction with AI service (synchronous or simple async with polling if necessary, no complex job queue initially).
+    * Database schema for `users` and `processingJobs` (basic status tracking).
+    * Basic frontend UI for the workflow using Shadcn/ui.
+    * Core AI Service endpoint(s) for the chosen MVP function.
+* **Phase 2 (Enhancements):**
+    * Implement both Summarization *and* Prompt Generation steps.
+    * Add file uploads (Supabase Storage) and document/chunk processing logic.
+    * Refine background job handling (webhook notification from AI service preferred over polling).
+    * Implement interactive editing UI for generated flashcards.
+    * Implement database schemas for `documents`, `documentChunks`, `flashcards`.
+* **Phase 3 (Monetization & Limits):**
+    * Stripe integration for subscriptions (Checkout, Portal, Webhooks).
+    * Database schema updates for subscription status and AI credit tracking (`users` table).
+    * Implement logic for different membership tiers and AI credit limits in relevant Server Actions.
+* **Future Considerations (Post-MVP):**
+    * Advanced job status notifications (SSE/WebSockets).
+    * User dashboard (history, usage).
+    * More sophisticated parsing/formatting options.
+    * File cleanup strategies.
+    * Admin interface.
+
+*(Implementers should focus on delivering Phase 1 first, ensuring core functionality is stable before moving to subsequent phases.)*
+
+## 4. Architecture Overview & Data Flow
+
+This application uses a hybrid architecture:
+
+1.  **Next.js Application:** Serves the frontend UI (React/Shadcn), handles user authentication (Clerk), manages user data and subscription state (Supabase/Drizzle), processes payments (Stripe), and orchestrates AI tasks.
+2.  **Python AI Service:** A separate FastAPI/Flask application responsible for the core AI processing (interacting with OpenAI/Anthropic/Tiktoken) via a simple internal API.
+
+**Typical AI Job Flow:**
+
+1.  **User Interaction (Next.js Client):** User submits text or file in the UI.
+2.  **Orchestration (Next.js Server Action):**
+    * Authenticates user (Clerk `auth()`).
+    * Checks user's AI credits (DB query). Denies if insufficient.
+    * (If file upload) Saves file to Supabase Storage, creates `documents`/`documentChunks` records in DB.
+    * Creates a `processingJobs` record in DB (status 'pending', `jobType`, `inputPayload`).
+    * Makes an **asynchronous** HTTP POST request to the Python AI Service API endpoint (e.g., `/api/v1/summarize`), passing the `jobId` and necessary input data (text, document details, etc.).
+    * (Optional) Decrements user credits provisionally.
+    * Returns the `jobId` to the client `{ isSuccess: true, data: { jobId } }`.
+3.  **AI Processing Trigger (Python AI Service):**
+    * Receives request, validates input and internal API key.
+    * Returns `202 Accepted` immediately to Next.js.
+    * Initiates background processing (FastAPI `BackgroundTasks` or Celery task) using the `jobId` and input data.
+4.  **AI Processing (Python Background Task):**
+    * Performs actual AI API calls (OpenAI/Anthropic), text processing (chunking, parsing).
+    * Handles AI API errors, timeouts.
+5.  **Status Update (Python AI Service -> Next.js):**
+    * Upon completion/failure of the background task, the Python service makes an authenticated HTTP POST request to a specific webhook endpoint on the Next.js app (e.g., `/api/webhooks/ai-service-status`).
+    * The payload includes `jobId`, `status` ('completed'/'failed'), and `resultPayload` (e.g., summary, generated cards) or `errorMessage`.
+6.  **Result Handling (Next.js Webhook):**
+    * Receives the status update from the AI service. Verifies authenticity (e.g., shared secret).
+    * Updates the corresponding `processingJobs` record in the DB with the final status, result/error message, and completion timestamp.
+    * (If credits weren't decremented earlier) Decrement user credits now upon successful completion. Handle potential refunds/credit restoration on failure if needed.
+7.  **User Notification (Next.js Client):**
+    * The client UI (e.g., on the `/create/[jobId]` page) polls a Next.js API route (`/api/job-status/[jobId]`) which reads the job status from the DB, OR receives real-time updates via SSE/WebSockets (Phase 2/3).
+    * When the status changes to 'completed' or 'failed', the UI updates to show results or errors.
+
+## 5. Tech Stack
+
+* **Frontend & Main Backend (Orchestration):**
+    * **Framework:** Next.js (App Router, TypeScript)
+    * **UI:** React, Tailwind CSS, Shadcn/ui
+    * **State Management:** React Context/Hooks, Zustand (optional)
+    * **Animations:** Framer Motion
+    * **Backend Logic:** Next.js Server Actions
+* **AI Core Logic Service:**
+    * **Language:** Python (3.9+ recommended)
+    * **Framework:** FastAPI (recommended)
+    * **AI Libraries:** `openai`, `anthropic`, `tiktoken`
+    * **Background Tasks (Conditional):** Celery + Redis (Only if required for tasks consistently > 60s within the AI service itself. Prefer FastAPI `BackgroundTasks` for shorter operations initiated by API calls).
+* **Database:**
+    * **Provider:** Supabase (Postgres)
+    * **ORM:** Drizzle ORM
+* **Authentication:** Clerk
+* **Payments:** Stripe
+* **Deployment:**
+    * **Next.js App:** Vercel
+    * **Python AI Service:** Container Host (e.g., AWS App Runner, Google Cloud Run, Fly.io).
+* **Storage (User Uploads):** Supabase Storage
+
+## 6. Project Structure
+
+```
+.
+├── nextjs-app/ # Main Next.js Application
+│   ├── actions/          # Server Actions
+│   │   ├── db/           #   - DB CRUD (users, jobs, documents, etc.)
+│   │   ├── ai/           #   - Orchestrate AI job submission
+│   │   ├── stripe/       #   - Stripe Checkout, Portal
+│   │   └── storage/      #   - Document upload handling
+│   ├── app/              # Next.js App Router
+│   │   ├── (auth)/       #   - Clerk auth routes & pages
+│   │   ├── (main)/       #   - Authenticated routes
+│   │   │   ├── create/     #     - Flashcard creation workflow
+│   │   │   │   ├── [jobId]/  #     - Job status/results page
+│   │   │   │   │   └── page.tsx
+│   │   │   │   ├── _components/ # - Workflow step components
+│   │   │   │   ├── layout.tsx   # - Workflow layout
+│   │   │   │   └── page.tsx     # - Initial input page
+│   │   │   ├── billing/    #     - Subscription management
+│   │   │   └── layout.tsx    #     - Main area layout
+│   │   ├── api/          #   - API routes
+│   │   │   ├── webhooks/   #     - /stripe, /ai-service-status
+│   │   │   └── job-status/ #     - Optional: /api/job-status/[jobId] (GET)
+│   │   ├── layout.tsx    #   - Root layout
+│   │   └── global.css
+│   ├── components/       # Shared React components
+│   │   ├── ui/           #   - Shadcn/ui primitives
+│   │   ├── shared/       #   - Custom shared (PageHeader, LoadingSpinner, etc.)
+│   │   └── providers/    #   - Context providers
+│   ├── db/               # Database (Drizzle ORM)
+│   │   ├── schema/       #   - Schema definitions (*.ts)
+│   │   │   └── index.ts  #     - Exports
+│   │   ├── migrations/   #   - SQL migration files
+│   │   └── drizzle.config.ts
+│   │   └── db.ts         #   - Drizzle client instance
+│   ├── lib/              # Library code, utilities
+│   │   ├── hooks/        #   - Custom React hooks
+│   │   ├── utils.ts      #   - General utils (cn)
+│   │   ├── stripe/       #   - Stripe client & helpers
+│   │   ├── supabase/     #   - Supabase client setup
+│   │   └── ai-client.ts  #   - Typed HTTP client for Python AI Service
+│   ├── types/            # Shared TypeScript types
+│   │   └── index.ts      #   - Exports (ActionState, Anki types, etc.)
+│   ├── .env.local
+│   ├── .env.example
+│   ├── middleware.ts     # Clerk route protection
+│   ├── next.config.mjs
+│   ├── tsconfig.json
+│   └── tailwind.config.ts
+│
+└── ai-service/ # Python AI Microservice (FastAPI)
+    ├── app/              # FastAPI application code
+    │   ├── main.py       #   - FastAPI app instance, routers, CORS middleware
+    │   ├── api/          #   - API endpoint routers (e.g., api/v1/ai_tasks.py)
+    │   ├── core/         #   - Core logic
+    │   │   ├── ai_caller.py # - Interface with OpenAI/Anthropic SDKs
+    │   │   ├── logic.py    # - Summarization/generation implementation
+    │   │   └── text_processing.py # - Chunking, token counting, parsing
+    │   ├── schemas/      #   - Pydantic models for API validation
+    │   ├── config.py     #   - Configuration (Pydantic Settings)
+    │   └── dependencies.py # - API key validation dependency
+    ├── tests/            # Unit/integration tests
+    ├── .env.local
+    ├── .env.example
+    ├── Dockerfile
+    └── requirements.txt
+```
+
+## 7. Rules
+
+Follow these rules diligently when building the app.
+
+### 7.1. General Rules (Applies to Both Services)
+
+* **Environment Variables:**
+    * Store all secrets and configurations in `.env.local`. Use separate files for `nextjs-app` and `ai-service`.
+    * Maintain up-to-date `.env.example` files in both root directories. **Never** commit `.env.local`.
+    * In `nextjs-app`, prefix browser-accessible variables with `NEXT_PUBLIC_`.
+    * In `ai-service`, load via Pydantic Settings or `python-dotenv`.
+    * **Required Vars Check:** Ensure `.env.example` includes placeholders for all keys mentioned in Section 5.1 of the v2.0 spec (Database, Clerk, Stripe, Supabase, AI Service URLs/Keys, Model Names, Bucket Name, Webhook Secrets). Add `NEXTJS_APP_STATUS_WEBHOOK_URL` to `ai-service/.env.example`.
+* **Naming:** Use `kebab-case` for files/folders unless it's a React component (`PascalCase.tsx`), Python class (`PascalCase`), or standard config file.
+* **Error Handling:** Implement comprehensive, consistent error handling.
+    * Next.js Server Actions **must** return `ActionState<TData>`. Include user-friendly messages. Populate `error` field with validation details (e.g., `{ fieldName: ["message"] }`).
+    * API endpoints (AI service, Next.js webhooks) must use appropriate HTTP status codes (`200`, `202`, `400`, `401`, `403`, `422`, `500`) and consistent JSON error responses (e.g., `{ "detail": "Error message", "errorCode": "SPECIFIC_CODE" }`).
+    * Log detailed errors server-side in both services, including relevant IDs (user, job, document).
+    * *Example `ActionState` Error:* `{ isSuccess: false, message: "Insufficient credits for this operation.", error: { credits: ["Minimum 10 credits required."] } }`
+    * *Example API Error Response (JSON):* `Status: 422 Unprocessable Entity`, Body: `{ "detail": "Input text exceeds maximum length.", "errorCode": "INPUT_TOO_LONG" }`
+* **Logging:** Implement structured JSON logging. Include context (e.g., `userId`, `jobId`, `requestId`). Use standard levels: `INFO`, `WARN`, `ERROR`. Consider `DEBUG` for development.
+    * *Next.js:* Use `pino` or similar structured logger server-side.
+    * *Python:* Configure Python's `logging` module with a `JSONFormatter`.
+* **Code Comments:** Add comments for complex logic, assumptions, or non-obvious decisions.
+
+### 7.2. Next.js App Rules (`nextjs-app/`)
+
+* **Imports:** Use `@/` path aliases.
+* **Naming:** `PascalCase.tsx` for components, `kebab-case` otherwise.
+* **Shadcn/ui:** Prefer composition; avoid direct modification of `components/ui`.
+* **Type Rules:**
+    * Use `types/` directory, export via `index.ts`.
+    * Use `interface` for extensible object shapes, `type` otherwise.
+    * Import Drizzle types from `@/db/schema`.
+    * Define specific types for Anki workflow (e.g., `Flashcard`, `JobStatus`, AI request/response shapes matching `ai-client.ts`).
+    * Server Actions **must** return `Promise<ActionState<TData>>`.
+* **Frontend Rules:**
+    * **Icons:** Use `lucide-react`.
+    * **Semantic HTML:** Prioritize semantic elements.
+    * **Styling:** Use Tailwind utilities via `cn()`. Minimize global CSS.
+    * **Component Tagging:** Tag **all** `.tsx` files with `"use server"` or `"use client"`.
+    * **Context Providers:** Use in appropriate layouts (`ClerkProvider`, `ThemeProvider`, `Toaster` required in root).
+    * **Workflow UI:** Implement clear steps (`/create/*`). Manage state effectively (client/URL/DB). Use Shadcn components.
+    * **Loading/Error States:** Crucial for good UX. Use `<Suspense>`, `useFormStatus`, `Toast`, inline errors based on `ActionState`. Clearly indicate when AI processing is happening.
+    * **Job Status Display (`/create/[jobId]/page.tsx`):** Fetch status via polling (`/api/job-status/[jobId]`) or implement SSE/WebSockets later. Clearly show status and results/errors. Provide navigation back or to the next step (e.g., editing).
+* **Components (`components/`):**
+    * Use `_components` for route-specific items. Use `components/shared` for reusable custom components (e.g., `FlashcardEditor`).
+    * Separate JSX blocks visually.
+* **Data Fetching & Mutations:** Server Components fetch data (`async/await`). Server Actions handle mutations and AI service orchestration.
+* **Server Components (`"use server"`):** Tag, fetch data, use Suspense, no client hooks.
+* **Client Components (`"use client"`):** Tag, use hooks, receive props, trigger Server Actions. Use `react-hook-form` for validation/state management in complex forms.
+
+### 7.3. Backend Rules (Next.js - Server Actions, API Routes)
+
+* **Database Migrations (Drizzle):**
+    * **Mandatory:** Use `npx drizzle-kit generate:pg --schema=./src/db/schema/index.ts`.
+    * **Review:** Always review the generated SQL migration file.
+    * **Apply:** Apply sequentially in staging/prod (Supabase dashboard or CI/CD script). Local dev can use `push:pg` cautiously initially but should prefer applying migrations. `npx drizzle-kit migrate` (using `postgres` driver) is the command for applying migrations via script.
+    * **Commit:** Commit schema `.ts` files AND migration `.sql` files.
+* **Schemas (`db/schema/`):**
+    * Follow naming/export/registration rules. Use appropriate Drizzle/PG types (`pgTable`, `uuid`, `text`, `timestamp`, `integer`, `boolean`, `jsonb`, `pgEnum`).
+    * **Standard Columns:** `userId` (Text), `createdAt` (Timestamp TZ), `updatedAt` (Timestamp TZ).
+    * **Anki App Schemas (Confirm MVP needs):** Implement `users`, `documents`, `documentChunks` (potentially Phase 2), `processingJobs`, `flashcards` as defined in v2.0 spec. Ensure foreign keys and relations (`relations` helper) are correctly defined with appropriate `ON DELETE` behavior. Consider indexing key columns (`userId`, `status`, `documentId`).
+* **Server Actions (`actions/`):**
+    * Place in subdirs, mark `"use server"`, name `*Action`. Return `Promise<ActionState<TData>>`.
+    * **Auth/Authz:** Check `auth()`. Verify resource ownership (`userId`).
+    * **Input Validation:** Use Zod rigorously.
+    * **Error Handling:** `try...catch`, return failure `ActionState`, log details.
+    * **AI Actions (`actions/ai/`):**
+        * `submitAiJobAction(jobType, inputPayload, documentId?)`: Checks auth & credits -> Creates `processingJobs` DB record -> **Async POST** to Python AI Service (pass `jobId`) -> Returns `{ isSuccess: true, data: { jobId } }`.
+    * **DB Actions (`actions/db/`):** CRUD using Drizzle. Use `revalidatePath`/`revalidateTag`.
+* **API Routes (`app/api/`)**
+    * **Webhooks (`/api/webhooks/`):**
+        * `/stripe`: Verify signature. Update `users` table (subscription status, credits) based on event type. Return `200 OK`.
+        * `/ai-service-status`: Verify authenticity (shared secret/API key). Update `processingJobs` table (status, result/error, timestamps). Return `200 OK`.
+    * **Job Status Polling (`/api/job-status/[jobId]/route.ts` - GET, Optional):** Check auth, verify ownership, query `processingJobs`, return JSON status/result.
+
+### 7.4. Python AI Microservice Rules (`ai-service/`)
+
+* **Framework:** Use FastAPI.
+* **Structure:** Follow proposed structure (`app/main.py`, `app/api/`, `app/core/`, `app/schemas/`).
+* **API Endpoints (`app/api/v1/`):**
+    * Define routers for tasks (e.g., `ai_tasks.py`). Endpoints: `/summarize`, `/generate-prompts`.
+    * **Input:** Use Pydantic schemas (`app/schemas/`) for request body validation (expect `jobId`, text/doc info, config).
+    * **Authentication:** Use FastAPI Dependency to validate a shared `INTERNAL_API_KEY` passed in headers.
+    * **Processing (Webhook Notification):**
+        1.  Validate input & API Key. Return `401`/`422` on failure.
+        2.  Return `202 Accepted`.
+        3.  Use FastAPI `BackgroundTasks.add_task(process_ai_job, job_id, input_data)` where `process_ai_job` is an async function.
+        4.  `process_ai_job`: Calls core logic -> On completion/failure, makes an authenticated POST to `NEXTJS_APP_STATUS_WEBHOOK_URL` with job outcome. Handle errors during webhook call.
+* **AI Logic (`app/core/`):**
+    * `ai_caller.py`: Handles SDK interactions (OpenAI, Anthropic), manages API keys, timeouts, API-specific error mapping.
+    * `logic.py`: Implements `summarize`, `generate_prompts` logic, calls `ai_caller`.
+* **Text Processing (`app/core/text_processing.py`):** Centralize `chunk_text` (define chunking threshold clearly, e.g., based on token count), `count_tokens`, `parse_qa_pairs`, `format_for_anki`.
+* **Configuration (`app/config.py`):** Use Pydantic `BaseSettings` to load env vars (API Keys, Model Names, Webhook URL, API Key).
+* **Error Handling:** Catch exceptions, log details. Ensure webhook payload clearly indicates success/failure and includes relevant data or error messages.
+* **Dockerfile:** Containerize using Python image, install dependencies, run `uvicorn app.main:app --host 0.0.0.0 --port 80`.
+* **Dependencies (`requirements.txt`):** `fastapi`, `uvicorn[standard]`, `openai`, `anthropic`, `tiktoken`, `python-dotenv`, `pydantic-settings`, `requests`. Add `celery`/`redis` only if explicitly needed for very long tasks.
+
+### 7.5. Auth Rules (Clerk)
+
+* **Setup:** Configure `<ClerkProvider>` in root layout. Set up required Clerk env vars.
+* **Accessing User:** Use `auth()` server-side, hooks client-side in Next.js app.
+* **Route Protection:** Use `middleware.ts` + `authMiddleware`. Define public routes explicitly (e.g., `/`, `/sign-in`, `/sign-up`, `/api/webhooks/*`). Protect others.
+* **Action/API Protection:** Check `userId` from `auth()` in all protected Server Actions/API routes.
+* **DB Link:** Ensure `user.created` webhook or first-access logic creates the corresponding record in the `users` DB table, storing the Clerk `userId`.
+* **Membership/Limits:** Base AI job submission logic in Server Actions on `aiCreditsRemaining` queried from the `users` table linked by `userId`.
+
+### 7.6. Payments Rules (Stripe)
+
+* **API Keys:** Store securely in Next.js env vars.
+* **Stripe Client:** Initialize server-side in Next.js (`lib/stripe/index.ts`).
+* **Webhook Handling (`/api/webhooks/stripe`):** **Critical.** Verify signature. Handle `checkout.session.completed`, `invoice.payment_succeeded`, `customer.subscription.*` events reliably. Update `users` table (status, credits, Stripe IDs). Handle potential payment failures gracefully (update status, notify user).
+* **Checkout Action:** Server Action creates session, includes `userId`, returns URL.
+* **Billing Portal Action:** Server Action gets `customerId`, creates portal session, returns URL.
+* **Data Sync:** `users` DB table is the source of truth for subscription status & credits within the app. Update only via verified webhooks.
+* **Trials/Proration/Refunds:** Define handling for these scenarios in webhook logic and potentially offer relevant Server Actions if applicable (e.g., initiating a refund - requires care).
+
+### 7.7. Storage Rules (Supabase Storage)
+
+* **Bucket:** Use **private** bucket (name from `UPLOADS_BUCKET_NAME` env var).
+* **Client Setup (`lib/supabase/`):** Provide server/client utils.
+* **Upload Process (Server Action):** Validate auth, file type/size -> Create `documents` DB record -> Construct `storagePath` (`${userId}/${documentId}/${filename}`) -> Upload via server client -> Update `documents` status/path. Return `ActionState`.
+* **Download:** Use signed URLs generated server-side via `createSignedUrl` if needed. Verify ownership.
+* **Deletion:** Verify ownership -> Remove from Supabase -> Delete DB records.
+* **Security (RLS):** Apply and enable the provided RLS policy on the bucket in the Supabase dashboard, ensuring the bucket name in the policy matches your environment variable.
+* **Housekeeping:** Consider future strategies for cleaning up orphaned files or implementing retention policies if necessary (e.g., via Supabase scheduled functions or manual scripts). This is likely post-MVP.
+
+### 7.8. Testing Strategy
+
+* **Unit Tests:**
+    * **`nextjs-app`:** Use `jest` or `vitest`. Test utility functions (`lib/`), helper functions within Server Actions (mocking DB/API calls), complex UI logic in Client Components (using React Testing Library).
+    * **`ai-service`:** Use `pytest`. Test core logic (`core/`), text processing functions, Pydantic schema validation, API endpoint logic (using `TestClient` from FastAPI, mocking external AI calls).
+* **Integration Tests:**
+    * **`nextjs-app`:** Test Server Actions by calling them directly, potentially with a test database connection. Test API routes using `Workspace` or a test client.
+    * **`ai-service`:** Test API endpoints including background task triggering and webhook callbacks (requires mocking the Next.js webhook receiver).
+* **End-to-End (E2E) Tests:** Use Playwright or Cypress within the `nextjs-app` to test key user flows (sign-up, create flashcard workflow, billing interaction) across the entire system (requires running both services).
+* **CI/CD:** Implement a CI/CD pipeline (e.g., GitHub Actions, Vercel integrations) that runs linters, type checks, unit tests, and integration tests on commits/pull requests. Automate deployments to Vercel (Next.js) and the container host (AI service) upon successful merge to main/production branch.
+
+### 7.9. Documentation & Onboarding
+
+* Maintain this Specification document as the central reference.
+* Create a `README.md` in both `nextjs-app` and `ai-service` directories covering:
+    * Quick start guide (setup `.env.local`, install deps, run dev servers).
+    * Key commands (`npm run dev`, `npm run db:generate`, `npm run db:migrate`, `uvicorn ...`, `pytest`).
+    * Brief description of the service/app's role.
+* Consider a `CONTRIBUTING.md` outlining contribution process, code style (use Prettier/ESLint, Black/Flake8), and commit message conventions.

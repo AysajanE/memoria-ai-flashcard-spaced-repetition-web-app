@@ -1,0 +1,19 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+---
+description: Follow these rules when working on auth.
+globs: 
+---
+# Auth Rules
+
+Follow these rules when working on auth.
+
+* **Setup:** Configure `<ClerkProvider>` in root layout. Set up required Clerk env vars.
+* **Accessing User:** Use `auth()` server-side, hooks client-side in Next.js app.
+* **Route Protection:** Use `middleware.ts` + `authMiddleware`. Define public routes explicitly (e.g., `/`, `/sign-in`, `/sign-up`, `/api/webhooks/*`). Protect others.
+* **Action/API Protection:** Check `userId` from `auth()` in all protected Server Actions/API routes.
+* **DB Link:** Ensure `user.created` webhook or first-access logic creates the corresponding record in the `users` DB table, storing the Clerk `userId`.
+* **Membership/Limits:** Base AI job submission logic in Server Actions on `aiCreditsRemaining` queried from the `users` table linked by `userId`.

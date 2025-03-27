@@ -1,0 +1,35 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+---
+description: Follow these rules when working on the backend.
+globs: 
+---
+# Backend Rules
+
+Follow these rules when working on the backend, such as server actions, API routes
+
+* **Database Migrations (Drizzle):**
+    * **Mandatory:** Use `npx drizzle-kit generate:pg --schema=./src/db/schema/index.ts`.
+    * **Review:** Always review the generated SQL migration file.
+    * **Apply:** Apply sequentially in staging/prod (Supabase dashboard or CI/CD script). Local dev can use `push:pg` cautiously initially but should prefer applying migrations. `npx drizzle-kit migrate` (using `postgres` driver) is the command for applying migrations via script.
+    * **Commit:** Commit schema `.ts` files AND migration `.sql` files.
+* **Schemas (`db/schema/`):**
+    * Follow naming/export/registration rules. Use appropriate Drizzle/PG types (`pgTable`, `uuid`, `text`, `timestamp`, `integer`, `boolean`, `jsonb`, `pgEnum`).
+    * **Standard Columns:** `userId` (Text), `createdAt` (Timestamp TZ), `updatedAt` (Timestamp TZ).
+    * **Anki App Schemas (Confirm MVP needs):** Implement `users`, `documents`, `documentChunks` (potentially Phase 2), `processingJobs`, `flashcards` as defined in v2.0 spec. Ensure foreign keys and relations (`relations` helper) are correctly defined with appropriate `ON DELETE` behavior. Consider indexing key columns (`userId`, `status`, `documentId`).
+* **Server Actions (`actions/`):**
+    * Place in subdirs, mark `"use server"`, name `*Action`. Return `Promise<ActionState<TData>>`.
+    * **Auth/Authz:** Check `auth()`. Verify resource ownership (`userId`).
+    * **Input Validation:** Use Zod rigorously.
+    * **Error Handling:** `try...catch`, return failure `ActionState`, log details.
+    * **AI Actions (`actions/ai/`):**
+        * `submitAiJobAction(jobType, inputPayload, documentId?)`: Checks auth & credits -> Creates `processingJobs` DB record -> **Async POST** to Python AI Service (pass `jobId`) -> Returns `{ isSuccess: true, data: { jobId } }`.
+    * **DB Actions (`actions/db/`):** CRUD using Drizzle. Use `revalidatePath`/`revalidateTag`.
+* **API Routes (`app/api/`)**
+    * **Webhooks (`/api/webhooks/`):**
+        * `/stripe`: Verify signature. Update `users` table (subscription status, credits) based on event type. Return `200 OK`.
+        * `/ai-service-status`: Verify authenticity (shared secret/API key). Update `processingJobs` table (status, result/error, timestamps). Return `200 OK`.
+    * **Job Status Polling (`/api/job-status/[jobId]/route.ts` - GET, Optional):** Check auth, verify ownership, query `processingJobs`, return JSON status/result.

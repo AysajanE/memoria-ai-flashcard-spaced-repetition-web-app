@@ -1,0 +1,100 @@
+# Environment Variables
+# Ignore all .env files except .env.example
+.env*
+!.env.example
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Editor Directories (Optional)
+.vscode/
+.idea/
+
+# === Python / AI Service Specific (ai-service/) ===
+
+# Virtual Environments
+ai-service/.venv/
+ai-service/venv/
+ai-service/env/
+ai-service/ENV/
+
+# Byte-compiled / optimized / DLL files
+ai-service/__pycache__/
+ai-service/**/*.py[cod]
+ai-service/**/*.so
+
+# Unit test / coverage reports
+ai-service/htmlcov/
+ai-service/.tox/
+ai-service/.nox/
+ai-service/.coverage
+ai-service/.coverage.*
+ai-service/.cache
+ai-service/.pytest_cache/
+ai-service/coverage.xml
+ai-service/*.cover
+
+# mypy cache
+ai-service/.mypy_cache/
+ai-service/.dmypy.json
+ai-service/dmypy.json
+
+# IPython
+ai-service/profile_default/
+ai-service/ipython_config.py
+
+# Jupyter Notebook
+ai-service/.ipynb_checkpoints
+
+# Flask session files (if filesystem session used in dev)
+ai-service/flask_session/
+
+# === Next.js Specific (nextjs-app/) ===
+
+# Dependencies
+nextjs-app/node_modules/
+
+# Build directory
+nextjs-app/.next/
+
+# Static HTML export directory
+nextjs-app/out/
+
+# Drizzle Studio cache
+nextjs-app/.DS_Store
+
+# TurboRepo cache
+nextjs-app/.turbo
+
+# Next.js telemetry data
+nextjs-app/next-env.d.ts
+
+# === Other Potential Ignores (Keep if relevant) ===
+
+# Distribution / packaging (if building Python packages)
+build/
+dist/
+*.egg-info/
+*.egg
+
+# PyInstaller (if used)
+*.manifest
+*.spec
+
+# SQLite databases (if used for local dev)
+*.sqlite3
+*.sqlite3-journal
+
+# Celery (if added later)
+celerybeat-schedule
+celerybeat.pid
+
+# Docker related (sometimes ignored, sometimes not)
+# docker-compose.override.yml

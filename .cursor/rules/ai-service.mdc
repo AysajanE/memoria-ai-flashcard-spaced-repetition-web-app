@@ -1,0 +1,32 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+---
+description: Follow these rules when working on Python AI microservices.
+globs: 
+---
+# Python AI Microservices Rules
+
+Follow these rules when working on the Python AI Microservices.
+
+* **Framework:** Use FastAPI.
+* **Structure:** Follow proposed structure (`app/main.py`, `app/api/`, `app/core/`, `app/schemas/`).
+* **API Endpoints (`app/api/v1/`):**
+    * Define routers for tasks (e.g., `ai_tasks.py`). Endpoints: `/summarize`, `/generate-prompts`.
+    * **Input:** Use Pydantic schemas (`app/schemas/`) for request body validation (expect `jobId`, text/doc info, config).
+    * **Authentication:** Use FastAPI Dependency to validate a shared `INTERNAL_API_KEY` passed in headers.
+    * **Processing (Webhook Notification):**
+        1.  Validate input & API Key. Return `401`/`422` on failure.
+        2.  Return `202 Accepted`.
+        3.  Use FastAPI `BackgroundTasks.add_task(process_ai_job, job_id, input_data)` where `process_ai_job` is an async function.
+        4.  `process_ai_job`: Calls core logic -> On completion/failure, makes an authenticated POST to `NEXTJS_APP_STATUS_WEBHOOK_URL` with job outcome. Handle errors during webhook call.
+* **AI Logic (`app/core/`):**
+    * `ai_caller.py`: Handles SDK interactions (OpenAI, Anthropic), manages API keys, timeouts, API-specific error mapping.
+    * `logic.py`: Implements `summarize`, `generate_prompts` logic, calls `ai_caller`.
+* **Text Processing (`app/core/text_processing.py`):** Centralize `chunk_text` (define chunking threshold clearly, e.g., based on token count), `count_tokens`, `parse_qa_pairs`, `format_for_anki`.
+* **Configuration (`app/config.py`):** Use Pydantic `BaseSettings` to load env vars (API Keys, Model Names, Webhook URL, API Key).
+* **Error Handling:** Catch exceptions, log details. Ensure webhook payload clearly indicates success/failure and includes relevant data or error messages.
+* **Dockerfile:** Containerize using Python image, install dependencies, run `uvicorn app.main:app --host 0.0.0.0 --port 80`.
+* **Dependencies (`requirements.txt`):** `fastapi`, `uvicorn[standard]`, `openai`, `anthropic`, `tiktoken`, `python-dotenv`, `pydantic-settings`, `requests`. Add `celery`/`redis` only if explicitly needed for very long tasks.

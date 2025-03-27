@@ -1,0 +1,20 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+---
+description: Follow these rules when working on file storage.
+globs: 
+---
+# Storage Rules
+
+Follow these rules when working with Supabase Storage.
+
+* **Bucket:** Use **private** bucket (name from `UPLOADS_BUCKET_NAME` env var).
+* **Client Setup (`lib/supabase/`):** Provide server/client utils.
+* **Upload Process (Server Action):** Validate auth, file type/size -> Create `documents` DB record -> Construct `storagePath` (`${userId}/${documentId}/${filename}`) -> Upload via server client -> Update `documents` status/path. Return `ActionState`.
+* **Download:** Use signed URLs generated server-side via `createSignedUrl` if needed. Verify ownership.
+* **Deletion:** Verify ownership -> Remove from Supabase -> Delete DB records.
+* **Security (RLS):** Apply and enable the provided RLS policy on the bucket in the Supabase dashboard, ensuring the bucket name in the policy matches your environment variable.
+* **Housekeeping:** Consider future strategies for cleaning up orphaned files or implementing retention policies if necessary (e.g., via Supabase scheduled functions or manual scripts). This is likely post-MVP.
