@@ -5,6 +5,7 @@ import { Card } from "@/components/ui/card";
 import { Flashcard } from "@/types";
 import { getDeckStudySessionAction } from "@/actions/study";
 import { Loader2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 export default function StudyPage({ params }: { params: { deckId: string } }) {
   const [deckName, setDeckName] = useState<string>("");
@@ -72,14 +73,55 @@ export default function StudyPage({ params }: { params: { deckId: string } }) {
     <div className="container max-w-2xl py-8">
       <h1 className="text-2xl font-bold mb-6">{deckName}</h1>
       
-      <Card className="p-6 min-h-[200px] flex items-center justify-center">
+      <Card className="p-6 min-h-[200px] flex flex-col items-center justify-center">
         <div className="text-center">
           <div className="text-lg mb-4">
-            {isShowingAnswer ? currentCard.back : currentCard.front}
+            {currentCard.front}
           </div>
           
-          {/* TODO: Add answer reveal button and rating buttons */}
-          <div className="text-sm text-muted-foreground">
+          {!isShowingAnswer ? (
+            <Button 
+              onClick={() => setIsShowingAnswer(true)}
+              className="mb-4"
+            >
+              Show Answer
+            </Button>
+          ) : (
+            <>
+              <div className="text-lg mb-6 text-muted-foreground">
+                {currentCard.back}
+              </div>
+              
+              <div className="flex gap-2 justify-center">
+                <Button 
+                  variant="destructive"
+                  onClick={() => {/* TODO: handleRating */}}
+                >
+                  Again
+                </Button>
+                <Button 
+                  variant="secondary"
+                  onClick={() => {/* TODO: handleRating */}}
+                >
+                  Hard
+                </Button>
+                <Button 
+                  variant="default"
+                  onClick={() => {/* TODO: handleRating */}}
+                >
+                  Good
+                </Button>
+                <Button 
+                  variant="secondary"
+                  onClick={() => {/* TODO: handleRating */}}
+                >
+                  Easy
+                </Button>
+              </div>
+            </>
+          )}
+          
+          <div className="text-sm text-muted-foreground mt-4">
             Card {currentCardIndex + 1} of {studyCards.length}
           </div>
         </div>
