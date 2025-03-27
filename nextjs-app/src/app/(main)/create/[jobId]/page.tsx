@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useEffect, useState, useTransition } from "react";
+import { useParams, useRouter } from "next/navigation";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Loader2 } from "lucide-react";
@@ -13,6 +13,8 @@ import { toast } from "sonner";
 
 export default function JobStatusPage() {
   const params = useParams();
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
   const jobId = params.jobId as string;
   const [job, setJob] = useState<{
     status: JobStatus;
@@ -55,14 +57,16 @@ export default function JobStatusPage() {
       return;
     }
 
-    const result = await reviewCardsAction(jobId, job.resultPayload.cards, targetDeck);
-    
-    if (result.isSuccess) {
-      toast.success(result.message);
-      // TODO: Redirect to decks page or show success state
-    } else {
-      toast.error(result.message || "Failed to approve cards");
-    }
+    startTransition(async () => {
+      const result = await reviewCardsAction(jobId, job.resultPayload.cards, targetDeck);
+      
+      if (result.isSuccess) {
+        toast.success(result.message);
+        router.push(`/decks/${result.data.deckId}`);
+      } else {
+        toast.error(result.message || "Failed to approve cards");
+      }
+    });
   };
 
   if (error) {
