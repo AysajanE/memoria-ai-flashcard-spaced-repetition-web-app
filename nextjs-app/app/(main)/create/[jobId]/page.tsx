@@ -44,8 +44,8 @@ export default function JobStatusPage() {
     // Initial fetch
     fetchJobStatus();
 
-    // Set up polling interval
-    intervalRef.current = setInterval(fetchJobStatus, 3000);
+    // Set up polling interval (5 seconds)
+    intervalRef.current = setInterval(fetchJobStatus, 5000);
 
     // Cleanup function
     return () => {
@@ -139,9 +139,21 @@ export default function JobStatusPage() {
           {job.status === "completed" && job.resultPayload && (
             <div>
               <h2 className="text-sm font-medium text-gray-500 mb-2">Results</h2>
-              <pre className="bg-gray-50 p-4 rounded-lg overflow-auto">
-                {JSON.stringify(job.resultPayload, null, 2)}
-              </pre>
+              <div className="space-y-4">
+                {job.resultPayload.cards?.map((card: any, index: number) => (
+                  <div key={`${job.id}-card-${index}`} className="bg-gray-50 p-4 rounded-lg">
+                    <div className="font-medium mb-2">Card {index + 1}</div>
+                    <div className="text-sm">
+                      <div className="mb-1">
+                        <span className="font-medium">Front:</span> {card.front}
+                      </div>
+                      <div>
+                        <span className="font-medium">Back:</span> {card.back}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 

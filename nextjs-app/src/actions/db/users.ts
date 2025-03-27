@@ -11,7 +11,7 @@ export async function syncUser(
   email: string,
   clerkCreatedAt: number,
   clerkUpdatedAt: number
-) {
+): Promise<ActionState> {
   try {
     await db
       .insert(users)
@@ -29,10 +29,14 @@ export async function syncUser(
         },
       });
 
-    return { success: true };
+    return { isSuccess: true, message: "User synced successfully" };
   } catch (error) {
     console.error('Error syncing user:', error);
-    return { success: false, error };
+    return { 
+      isSuccess: false, 
+      message: "Failed to sync user",
+      error: { sync: ["Failed to sync user data"] }
+    };
   }
 }
 
@@ -57,7 +61,8 @@ export async function getUserStatsAction(): Promise<ActionState<{
       columns: {
         dailyStudyCount: true,
         weeklyStudyCount: true,
-        totalRecallAccuracy: true,
+        totalReviews: true,
+        totalCorrectReviews: true,
         consecutiveStudyDays: true,
       },
     });
@@ -69,12 +74,17 @@ export async function getUserStatsAction(): Promise<ActionState<{
       };
     }
 
+    // Calculate accuracy percentage, handling division by zero
+    const accuracy = user.totalReviews > 0 
+      ? (user.totalCorrectReviews / user.totalReviews) * 100 
+      : 0;
+
     return {
       isSuccess: true,
       data: {
         dailyCount: user.dailyStudyCount,
         weeklyCount: user.weeklyStudyCount,
-        accuracy: Number(user.totalRecallAccuracy),
+        accuracy: Number(accuracy.toFixed(2)),
         streak: user.consecutiveStudyDays,
       },
     };

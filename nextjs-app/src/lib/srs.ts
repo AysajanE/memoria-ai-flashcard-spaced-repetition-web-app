@@ -11,6 +11,14 @@ interface SrsData {
 /**
  * Calculates new SRS data based on Anki's SM-2 variant algorithm
  * 
+ * This implementation is based on the SuperMemo 2 algorithm, as modified by Anki.
+ * The key differences from the original SM-2 are:
+ * 1. Separate handling of the learning phase (when interval = 0)
+ * 2. Modified ease factor adjustments for different ratings
+ * 3. Additional multiplier for "Easy" ratings
+ * 
+ * Source: Anki's default algorithm (https://apps.ankiweb.net/docs/manual.html#what-spaced-repetition-algorithm-does-anki-use)
+ * 
  * Intervals (in days):
  * - Again: 0 (reset to learning phase)
  * - Hard: currentInterval * 1.2 (slower progression)
@@ -28,6 +36,12 @@ interface SrsData {
  * - Hard: 0 (immediate review)
  * - Good: 1 (next day)
  * - Easy: 3 (3 days)
+ * 
+ * Bounds and Constraints:
+ * - Minimum ease factor: 1.3 (prevents cards from becoming too difficult)
+ * - Maximum ease factor: 2.5 (prevents cards from becoming too easy)
+ * - Intervals are rounded to whole days
+ * - Learning phase has fixed intervals for better initial retention
  */
 export function calculateSrsData(
   currentCard: Flashcard,
@@ -63,8 +77,8 @@ export function calculateSrsData(
 
   let newEaseFactor = currentEaseFactor + easeFactorAdjustments[rating];
   
-  // Ensure ease factor doesn't go below 1.3
-  newEaseFactor = Math.max(1.3, newEaseFactor);
+  // Ensure ease factor stays within bounds
+  newEaseFactor = Math.max(1.3, Math.min(2.5, newEaseFactor));
 
   // Calculate new interval
   let newInterval: number;

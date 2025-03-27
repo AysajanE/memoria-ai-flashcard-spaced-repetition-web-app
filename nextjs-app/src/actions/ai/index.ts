@@ -85,13 +85,13 @@ export async function submitTextForCardsAction(
 const ReviewCardsSchema = z.object({
   jobId: z.string().uuid(),
   reviewedCardsData: z.array(z.object({
-    front: z.string().min(1),
-    back: z.string().min(1),
-    type: z.enum(["qa", "cloze"]).optional(),
-  })).min(1),
+    front: z.string().min(1, "Front text is required").max(1000, "Front text is too long"),
+    back: z.string().min(1, "Back text is required").max(1000, "Back text is too long"),
+    type: z.enum(["qa", "cloze"]).default("qa"),
+  })).min(1, "At least one card is required").max(100, "Too many cards"),
   targetDeck: z.object({
     id: z.string().uuid().optional(),
-    name: z.string().min(1).optional(),
+    name: z.string().min(1, "Deck name is required").max(100, "Deck name is too long").optional(),
   }).refine((data) => data.id || data.name, {
     message: "Either deck ID or name must be provided",
   }),

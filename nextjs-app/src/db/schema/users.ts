@@ -1,4 +1,4 @@
-import { pgTable, text, integer, timestamp, decimal } from 'drizzle-orm/pg-core';
+import { pgTable, text, integer, timestamp } from 'drizzle-orm/pg-core';
 
 export const users = pgTable('users', {
   id: text('id').primaryKey(), // Clerk ID
@@ -8,7 +8,8 @@ export const users = pgTable('users', {
   subscriptionStatus: text('subscription_status'),
   dailyStudyCount: integer('daily_study_count').default(0).notNull(),
   weeklyStudyCount: integer('weekly_study_count').default(0).notNull(),
-  totalRecallAccuracy: decimal('total_recall_accuracy', { precision: 3, scale: 2 }).default('0.00').notNull(),
+  totalReviews: integer('total_reviews').default(0).notNull(),
+  totalCorrectReviews: integer('total_correct_reviews').default(0).notNull(),
   consecutiveStudyDays: integer('consecutive_study_days').default(0).notNull(),
   lastStudiedAt: timestamp('last_studied_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),

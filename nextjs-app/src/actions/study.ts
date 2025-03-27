@@ -160,7 +160,6 @@ export async function recordStudyRatingAction(
 
     // Update accuracy (Good/Easy ratings count as correct)
     const isCorrect = rating === 'Good' || rating === 'Easy';
-    const newAccuracy = ((Number(user.totalRecallAccuracy) * user.dailyStudyCount) + (isCorrect ? 1 : 0)) / (user.dailyStudyCount + 1);
 
     // Update database in a transaction
     await db.transaction(async (tx) => {
@@ -181,7 +180,8 @@ export async function recordStudyRatingAction(
         .set({
           dailyStudyCount: dailyCount,
           weeklyStudyCount: weeklyCount,
-          totalRecallAccuracy: newAccuracy.toFixed(2),
+          totalReviews: db.sql`${users.totalReviews} + 1`,
+          totalCorrectReviews: isCorrect ? db.sql`${users.totalCorrectReviews} + 1` : users.totalCorrectReviews,
           consecutiveStudyDays: newStreak,
           lastStudiedAt: now,
           updatedAt: now
