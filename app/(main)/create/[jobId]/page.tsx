@@ -1,98 +1,184 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
+import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Loader2 } from "lucide-react";
+import { JobStatus, FlashcardData } from "@/types";
+import { cn } from "@/lib/utils";
 import { ReviewCard } from "@/components/features/create/review-card";
-import { FlashcardData } from "@/types";
-import { JobStatus } from "@/types";
-import { getJobStatus } from "@/lib/api/jobs";
-import { LoadingSpinner } from "@/components/shared/loading-spinner";
-import { ErrorDisplay } from "@/components/shared/error-display";
 
 export default function JobStatusPage() {
   const params = useParams();
   const jobId = params.jobId as string;
+  const [job, setJob] = useState<{
+    status: JobStatus;
+    resultPayload?: { cards: FlashcardData[] } | null;
+    errorMessage?: string | null;
+  } | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [reviewCards, setReviewCards] = useState<FlashcardData[]>([]);
 
-  const { data: job, isLoading, error } = useQuery({
-    queryKey: ["job", jobId],
-    queryFn: () => getJobStatus(jobId),
-    refetchInterval: (data) => {
-      if (data?.status === "completed" || data?.status === "failed") {
-        return false;
-      }
-      return 2000;
-    },
-  });
-
   useEffect(() => {
-    if (job?.status === "completed" && job.resultPayload?.cards) {
-      setReviewCards(job.resultPayload.cards.map((card, index) => ({ ...card, tempId: index })));
-    }
-  }, [job]);
+    const fetchJobStatus = async () => {
+      try {
+        const response = await fetch(`/api/job-status/${jobId}`);
+        if (!response.ok) {
+          throw new Error("Failed to fetch job status");
+        }
+        const data = await response.json();
+        setJob(data);
+        
+        // Initialize review cards when job completes
+        if (data.status === "completed" && data.resultPayload?.cards) {
+          setReviewCards(data.resultPayload.cards);
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "An error occurred");
+      }
+    };
 
-  const handleDeleteCard = (index: number) => {
-    setReviewCards((prev) => prev.filter((_, i) => i !== index));
-  };
+    // Initial fetch
+    fetchJobStatus();
+
+    // Poll every 5 seconds if job is pending or processing
+    const interval = setInterval(() => {
+      if (job?.status === "pending" || job?.status === "processing") {
+        fetchJobStatus();
+      }
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [jobId, job?.status]);
 
   const handleUpdateCard = (index: number, updatedCard: FlashcardData) => {
-    console.log("Updating card:", { index, updatedCard });
-    // Placeholder for update logic
+    const newCards = [...reviewCards];
+    newCards[index] = updatedCard;
+    setReviewCards(newCards);
   };
 
-  if (isLoading) {
-    return <LoadingSpinner />;
-  }
+  const handleDeleteCard = (index: number) => {
+    const newCards = reviewCards.filter((_, i) => i !== index);
+    setReviewCards(newCards);
+  };
+
+  const handleAddManualCard = () => {
+    const newCard: FlashcardData = {
+      front: "",
+      back: "",
+      type: "qa",
+    };
+    setReviewCards([...reviewCards, newCard]);
+  };
 
   if (error) {
-    return <ErrorDisplay error={error} />;
+    return (
+      <div className="container max-w-4xl py-8">
+        <Card className="p-6">
+          <h1 className="text-2xl font-bold text-red-600 mb-4">Error</h1>
+          <p className="text-gray-600">{error}</p>
+        </Card>
+      </div>
+    );
   }
 
   if (!job) {
-    return <ErrorDisplay error={new Error("Job not found")} />;
+    return (
+      <div className="container max-w-4xl py-8">
+        <Card className="p-6">
+          <div className="flex items-center justify-center">
+            <Loader2 className="h-8 w-8 animate-spin text-gray-600" />
+          </div>
+        </Card>
+      </div>
+    );
   }
 
   return (
-    <div className="container mx-auto py-8">
-      <h1 className="text-2xl font-bold mb-6">Job Status</h1>
-      <Card>
-        <CardContent className="p-6">
-          <div className="space-y-4">
-            <div>
-              <h2 className="text-lg font-semibold">Status</h2>
-              <p className="text-muted-foreground">{job.status}</p>
+    <div className="container max-w-4xl py-8">
+      <Card className="p-6">
+        <div className="space-y-6">
+          {/* Status Header */}
+          <div className="flex items-center justify-between">
+            <h1 className="text-2xl font-bold">Job Status</h1>
+            <div className="flex items-center gap-2">
+              <div
+                className={cn(
+                  "h-2 w-2 rounded-full",
+                  job.status === "completed" && "bg-green-500",
+                  job.status === "failed" && "bg-red-500",
+                  (job.status === "pending" || job.status === "processing") &&
+                    "bg-yellow-500"
+                )}
+              />
+              <span className="capitalize">{job.status}</span>
             </div>
-            {job.status === JobStatus.COMPLETED && job.resultPayload && (
-              <div className="space-y-6">
-                <div>
-                  <h2 className="text-lg font-semibold mb-4">Generated Cards</h2>
-                  <div className="space-y-4">
-                    {reviewCards.map((card, index) => (
-                      <ReviewCard
-                        key={card.tempId}
-                        cardData={card}
-                        index={index}
-                        onDelete={handleDeleteCard}
-                        onUpdate={handleUpdateCard}
-                      />
-                    ))}
-                  </div>
-                </div>
-                {/* Placeholder for Add Manual Card button */}
-                {/* Placeholder for Approve & Assign button */}
-              </div>
-            )}
-            {job.status === JobStatus.FAILED && job.error && (
-              <div>
-                <h2 className="text-lg font-semibold text-destructive">Error</h2>
-                <p className="text-muted-foreground">{job.error}</p>
-              </div>
-            )}
           </div>
-        </CardContent>
+
+          {/* Loading State */}
+          {(job.status === "pending" || job.status === "processing") && (
+            <div className="flex flex-col items-center justify-center py-8 space-y-4">
+              <Loader2 className="h-8 w-8 animate-spin text-gray-600" />
+              <p className="text-gray-600">Generating cards, please wait...</p>
+            </div>
+          )}
+
+          {/* Success State */}
+          {job.status === "completed" && (
+            <div className="space-y-6">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-semibold">Review Cards</h2>
+                <Button onClick={handleAddManualCard}>
+                  Add Manual Card
+                </Button>
+              </div>
+              <div className="grid gap-4">
+                {reviewCards.map((card, index) => (
+                  <ReviewCard
+                    key={index}
+                    cardData={card}
+                    index={index}
+                    onUpdate={handleUpdateCard}
+                    onDelete={handleDeleteCard}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Error State */}
+          {job.status === "failed" && (
+            <div className="space-y-4">
+              <h2 className="text-xl font-semibold text-red-600">Job Failed</h2>
+              <p className="text-gray-600">{job.errorMessage}</p>
+              <Button
+                variant="outline"
+                onClick={() => window.location.href = "/create"}
+              >
+                Try Again
+              </Button>
+            </div>
+          )}
+
+          {/* Unexpected State */}
+          {job.status === "completed" && !job.resultPayload?.cards && (
+            <div className="space-y-4">
+              <h2 className="text-xl font-semibold text-yellow-600">
+                Unexpected State
+              </h2>
+              <p className="text-gray-600">
+                The job completed but no cards were generated. Please try again.
+              </p>
+              <Button
+                variant="outline"
+                onClick={() => window.location.href = "/create"}
+              >
+                Try Again
+              </Button>
+            </div>
+          )}
+        </div>
       </Card>
     </div>
   );
