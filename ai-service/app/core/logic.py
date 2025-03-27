@@ -1,10 +1,12 @@
 import json
+import time
 import logging
-from typing import Dict, List
-
+from typing import Dict, List, Any, Optional
+import requests
 from app.config import settings
 from app.core.ai_caller import generate_cards_with_ai, TokenLimitError, AIServiceError
 from app.core.text_processing import count_tokens, chunk_text
+from app.schemas.responses import WebhookPayload, GenerateCardsResult
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +27,130 @@ Generate the JSON list now based on the user's text."""
 
 # Maximum tokens for input text (leaving room for system prompt and response)
 MAX_INPUT_TOKENS = 3000
+
+class WebhookError(Exception):
+    """Custom exception for webhook-related errors"""
+    pass
+
+def clean_json_string(json_str: str) -> str:
+    """Clean and normalize JSON string before parsing"""
+    # Remove any markdown code block markers
+    json_str = json_str.replace("```json", "").replace("```", "")
+    
+    # Remove any leading/trailing whitespace
+    json_str = json_str.strip()
+    
+    # Handle potential line breaks in the JSON
+    json_str = " ".join(json_str.split())
+    
+    return json_str
+
+def parse_ai_response(response_text: str) -> Dict[str, Any]:
+    """Parse AI response with improved error handling"""
+    try:
+        # Clean the response text
+        cleaned_text = clean_json_string(response_text)
+        
+        # Attempt to parse
+        result = json.loads(cleaned_text)
+        
+        # Validate basic structure
+        if not isinstance(result, dict):
+            raise ValueError("Response must be a JSON object")
+        
+        if "cards" not in result:
+            raise ValueError("Response must contain 'cards' array")
+        
+        if not isinstance(result["cards"], list):
+            raise ValueError("'cards' must be an array")
+        
+        return result
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse AI response: {e}")
+        logger.error(f"Raw response: {response_text}")
+        raise ValueError(f"Invalid JSON response: {str(e)}")
+    except Exception as e:
+        logger.error(f"Unexpected error parsing AI response: {e}")
+        logger.error(f"Raw response: {response_text}")
+        raise
+
+def send_webhook_with_retry(
+    payload: WebhookPayload,
+    max_retries: int = 3,
+    initial_delay: float = 1.0,
+    max_delay: float = 5.0
+) -> None:
+    """Send webhook with exponential backoff retry"""
+    delay = initial_delay
+    last_error = None
+    
+    for attempt in range(max_retries):
+        try:
+            response = requests.post(
+                settings.NEXTJS_APP_STATUS_WEBHOOK_URL,
+                json=payload.model_dump(),
+                headers={"x-internal-api-key": settings.INTERNAL_API_KEY},
+                timeout=10
+            )
+            response.raise_for_status()
+            logger.info(f"Webhook sent successfully (attempt {attempt + 1})")
+            return
+        except requests.exceptions.RequestException as e:
+            last_error = e
+            logger.warning(f"Webhook attempt {attempt + 1} failed: {e}")
+            
+            if attempt < max_retries - 1:
+                time.sleep(delay)
+                delay = min(delay * 2, max_delay)  # Exponential backoff
+    
+    # If we get here, all retries failed
+    error_msg = f"Failed to send webhook after {max_retries} attempts. Last error: {last_error}"
+    logger.error(error_msg)
+    raise WebhookError(error_msg)
+
+def process_card_generation(
+    job_id: str,
+    input_text: str,
+    model: str,
+    start_time: float
+) -> None:
+    """Process card generation and send webhook with retries"""
+    try:
+        # Your existing AI processing logic here
+        # ...
+        
+        # Create result payload
+        result = GenerateCardsResult(
+            cards=[],  # Replace with actual generated cards
+            model=model,
+            processingTime=time.time() - start_time,
+            tokenCount=0  # Replace with actual token count
+        )
+        
+        # Create and send webhook payload
+        webhook_payload = WebhookPayload(
+            jobId=job_id,
+            status="completed",
+            resultPayload=result.model_dump()
+        )
+        
+        send_webhook_with_retry(webhook_payload)
+        
+    except Exception as e:
+        logger.error(f"Error processing card generation: {e}")
+        
+        # Send failure webhook
+        webhook_payload = WebhookPayload(
+            jobId=job_id,
+            status="failed",
+            errorMessage=str(e)
+        )
+        
+        try:
+            send_webhook_with_retry(webhook_payload)
+        except WebhookError as webhook_error:
+            logger.error(f"Failed to send failure webhook: {webhook_error}")
+            # Don't re-raise here as the original error is more important
 
 async def generate_flashcards_from_text(text: str) -> Dict[str, List[Dict[str, str]]]:
     """
