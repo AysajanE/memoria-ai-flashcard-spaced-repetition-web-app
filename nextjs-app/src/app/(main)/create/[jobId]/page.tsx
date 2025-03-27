@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useState, useEffect, useTransition } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,7 @@ export default function JobStatusPage() {
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isApproveDialogOpen, setIsApproveDialogOpen] = useState(false);
+  const [isPolling, setIsPolling] = useState(true);
 
   useEffect(() => {
     const fetchJobStatus = async () => {
@@ -33,8 +34,14 @@ export default function JobStatusPage() {
         }
         const data = await response.json();
         setJob(data);
+        
+        // Stop polling if job is completed or failed
+        if (data.status === "completed" || data.status === "failed") {
+          setIsPolling(false);
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : "An error occurred");
+        setIsPolling(false);
       }
     };
 
@@ -43,13 +50,13 @@ export default function JobStatusPage() {
 
     // Poll every 5 seconds if job is pending or processing
     const interval = setInterval(() => {
-      if (job?.status === "pending" || job?.status === "processing") {
+      if (isPolling) {
         fetchJobStatus();
       }
     }, 5000);
 
     return () => clearInterval(interval);
-  }, [jobId, job?.status]);
+  }, [jobId, isPolling]);
 
   const handleApproveSubmit = async (targetDeck: { id?: string; name?: string }) => {
     if (!job?.resultPayload?.cards) {
@@ -73,8 +80,11 @@ export default function JobStatusPage() {
     return (
       <div className="container max-w-4xl py-8">
         <Card className="p-6">
-          <h1 className="text-2xl font-bold text-red-600 mb-4">Error</h1>
-          <p className="text-gray-600">{error}</p>
+          <div className="flex flex-col items-center justify-center space-y-4">
+            <h1 className="text-2xl font-bold text-destructive">Error</h1>
+            <p className="text-muted-foreground text-center">{error}</p>
+            <Button onClick={() => router.push("/create")}>Try Again</Button>
+          </div>
         </Card>
       </div>
     );
@@ -84,8 +94,9 @@ export default function JobStatusPage() {
     return (
       <div className="container max-w-4xl py-8">
         <Card className="p-6">
-          <div className="flex items-center justify-center">
-            <Loader2 className="h-8 w-8 animate-spin text-gray-600" />
+          <div className="flex flex-col items-center justify-center space-y-4">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            <p className="text-muted-foreground">Loading job status...</p>
           </div>
         </Card>
       </div>
@@ -110,14 +121,21 @@ export default function JobStatusPage() {
                 )}
               />
               <span className="capitalize">{job.status}</span>
+              {(job.status === "pending" || job.status === "processing") && (
+                <Loader2 className="h-4 w-4 animate-spin text-primary" />
+              )}
             </div>
           </div>
 
           {/* Loading State */}
           {(job.status === "pending" || job.status === "processing") && (
             <div className="flex flex-col items-center justify-center py-8 space-y-4">
-              <Loader2 className="h-8 w-8 animate-spin text-gray-600" />
-              <p className="text-gray-600">Generating cards, please wait...</p>
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              <p className="text-muted-foreground">
+                {job.status === "pending" 
+                  ? "Your job is queued and will start soon..."
+                  : "Generating cards, please wait..."}
+              </p>
             </div>
           )}
 
@@ -126,8 +144,18 @@ export default function JobStatusPage() {
             <div className="space-y-6">
               <div className="flex items-center justify-between">
                 <h2 className="text-xl font-semibold">Generated Cards</h2>
-                <Button onClick={() => setIsApproveDialogOpen(true)}>
-                  Approve & Assign Cards
+                <Button 
+                  onClick={() => setIsApproveDialogOpen(true)}
+                  disabled={isPending}
+                >
+                  {isPending ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                      Approving...
+                    </>
+                  ) : (
+                    "Approve & Assign Cards"
+                  )}
                 </Button>
               </div>
               <div className="grid gap-4">
@@ -135,15 +163,15 @@ export default function JobStatusPage() {
                   <Card key={index} className="p-4">
                     <div className="space-y-2">
                       <div>
-                        <h3 className="font-medium text-gray-700">Front</h3>
-                        <p className="text-gray-600">{card.front}</p>
+                        <h3 className="font-medium text-foreground">Front</h3>
+                        <p className="text-muted-foreground">{card.front}</p>
                       </div>
                       <div>
-                        <h3 className="font-medium text-gray-700">Back</h3>
-                        <p className="text-gray-600">{card.back}</p>
+                        <h3 className="font-medium text-foreground">Back</h3>
+                        <p className="text-muted-foreground">{card.back}</p>
                       </div>
                       {card.type && (
-                        <div className="text-sm text-gray-500">
+                        <div className="text-sm text-muted-foreground">
                           Type: {card.type}
                         </div>
                       )}
@@ -156,12 +184,12 @@ export default function JobStatusPage() {
 
           {/* Error State */}
           {job.status === "failed" && (
-            <div className="space-y-4">
-              <h2 className="text-xl font-semibold text-red-600">Job Failed</h2>
-              <p className="text-gray-600">{job.errorMessage}</p>
+            <div className="flex flex-col items-center justify-center space-y-4">
+              <h2 className="text-xl font-semibold text-destructive">Job Failed</h2>
+              <p className="text-muted-foreground text-center">{job.errorMessage}</p>
               <Button
                 variant="outline"
-                onClick={() => window.location.href = "/create"}
+                onClick={() => router.push("/create")}
               >
                 Try Again
               </Button>
@@ -170,16 +198,16 @@ export default function JobStatusPage() {
 
           {/* Unexpected State */}
           {job.status === "completed" && !job.resultPayload?.cards && (
-            <div className="space-y-4">
+            <div className="flex flex-col items-center justify-center space-y-4">
               <h2 className="text-xl font-semibold text-yellow-600">
                 Unexpected State
               </h2>
-              <p className="text-gray-600">
+              <p className="text-muted-foreground text-center">
                 The job completed but no cards were generated. Please try again.
               </p>
               <Button
                 variant="outline"
-                onClick={() => window.location.href = "/create"}
+                onClick={() => router.push("/create")}
               >
                 Try Again
               </Button>

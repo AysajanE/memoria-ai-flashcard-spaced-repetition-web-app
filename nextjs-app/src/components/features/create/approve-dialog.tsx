@@ -36,36 +36,44 @@ export function ApproveDialog({ isOpen, setIsOpen, onSubmit }: ApproveDialogProp
   const [newDeckName, setNewDeckName] = useState("");
   const [isPending, startTransition] = useTransition();
   const [isLoadingDecks, setIsLoadingDecks] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (isOpen) {
       setIsLoadingDecks(true);
-      getDecksAction().then((result) => {
-        if (result.isSuccess && result.data) {
-          setDecks(result.data);
-        } else {
-          toast.error(result.message || "Failed to fetch decks");
-        }
-      }).catch((err) => {
-        toast.error("Failed to fetch decks");
-        console.error(err);
-      }).finally(() => {
-        setIsLoadingDecks(false);
-      });
+      setError(null);
+      getDecksAction()
+        .then((result) => {
+          if (result.isSuccess && result.data) {
+            setDecks(result.data);
+          } else {
+            setError(result.message || "Failed to fetch decks");
+            toast.error(result.message || "Failed to fetch decks");
+          }
+        })
+        .catch((err) => {
+          setError("Failed to fetch decks");
+          toast.error("Failed to fetch decks");
+          console.error(err);
+        })
+        .finally(() => {
+          setIsLoadingDecks(false);
+        });
     }
   }, [isOpen]);
 
   const handleSubmit = () => {
     if (!selectedDeckId && !newDeckName) {
-      toast.error("Please select a deck or create a new one");
+      setError("Please select an existing deck or create a new one");
       return;
     }
 
     if (newDeckName && newDeckName.length < 3) {
-      toast.error("Deck name must be at least 3 characters long");
+      setError("Deck name must be at least 3 characters long");
       return;
     }
 
+    setError(null);
     startTransition(() => {
       onSubmit(selectedDeckId ? { id: selectedDeckId } : { name: newDeckName });
       setIsOpen(false);
@@ -89,6 +97,7 @@ export function ApproveDialog({ isOpen, setIsOpen, onSubmit }: ApproveDialogProp
               onValueChange={(value) => {
                 setSelectedDeckId(value);
                 setNewDeckName("");
+                setError(null);
               }}
               disabled={isLoadingDecks || isPending}
             >
@@ -113,23 +122,34 @@ export function ApproveDialog({ isOpen, setIsOpen, onSubmit }: ApproveDialogProp
               onChange={(e) => {
                 setNewDeckName(e.target.value);
                 setSelectedDeckId(undefined);
+                setError(null);
               }}
               disabled={isPending}
             />
           </div>
+          {error && (
+            <p className="text-sm text-destructive">{error}</p>
+          )}
         </div>
         <DialogFooter>
+          <Button
+            variant="outline"
+            onClick={() => setIsOpen(false)}
+            disabled={isPending}
+          >
+            Cancel
+          </Button>
           <Button
             onClick={handleSubmit}
             disabled={isPending || (!selectedDeckId && !newDeckName)}
           >
             {isPending ? (
               <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Processing...
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                Assigning Cards...
               </>
             ) : (
-              "Approve & Save"
+              "Assign Cards"
             )}
           </Button>
         </DialogFooter>
