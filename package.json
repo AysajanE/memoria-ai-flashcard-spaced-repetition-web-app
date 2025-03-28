@@ -1,21 +1,25 @@
 {
+  "name": "memoria-ai-flashcard-app-root",
+  "private": true,
+  "workspaces": [
+    "nextjs-app",
+    "ai-service"
+  ],
   "dependencies": {
     "@neondatabase/serverless": "^1.0.0",
-    "drizzle-orm": "^0.41.0",
-    "gray-matter": "^4.0.3",
-    "next": "^14.2.25",
-    "next-themes": "^0.4.6",
-    "postgres": "^3.4.5",
-    "react-markdown": "^10.1.0",
-    "remark-gfm": "^4.0.1",
-    "sonner": "^2.0.2"
+    "gray-matter": "^4.0.3"
   },
   "devDependencies": {
-    "drizzle-kit": "^0.30.6"
+    "drizzle-kit": "^0.30.6",
+    "drizzle-orm": "^0.41.0"
   },
   "scripts": {
     "db:generate": "drizzle-kit generate:pg --schema=./db/schema/index.ts",
     "db:migrate": "drizzle-kit push:pg",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "dev:next": "cd nextjs-app && npm run dev",
+    "dev:ai": "cd ai-service && python -m uvicorn app.main:app --reload",
+    "build:next": "cd nextjs-app && npm run build",
+    "install:all": "npm install && cd nextjs-app && npm install && cd ../ai-service && pip install -r requirements.txt"
   }
 }
