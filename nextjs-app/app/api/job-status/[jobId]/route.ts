@@ -5,6 +5,8 @@ import { processingJobs } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import { z } from "zod";
 
+export const runtime = 'nodejs'; // Use Node.js runtime
+
 // UUID validation regex
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;

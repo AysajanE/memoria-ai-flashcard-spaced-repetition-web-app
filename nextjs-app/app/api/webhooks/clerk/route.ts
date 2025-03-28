@@ -4,6 +4,8 @@ import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { syncUser } from "../../../actions/db/users";
 
+export const runtime = 'nodejs'; // Use Node.js runtime
+
 export async function POST(req: Request) {
   // Get the headers
   const headerPayload = await headers();
