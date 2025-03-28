@@ -17,7 +17,10 @@ export async function getDecksAction(): Promise<ActionState<Deck[]>> {
       };
     }
 
-    const userDecks = await db.select().from(decks).where(eq(decks.userId, userId));
+    const userDecks = await db
+      .select()
+      .from(decks)
+      .where(eq(decks.userId, userId));
 
     return {
       isSuccess: true,
@@ -30,4 +33,4 @@ export async function getDecksAction(): Promise<ActionState<Deck[]>> {
       message: "Failed to fetch decks",
     };
   }
-} 
+}

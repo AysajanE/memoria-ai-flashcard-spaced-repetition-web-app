@@ -84,17 +84,34 @@ export async function submitTextForCardsAction(
 
 const ReviewCardsSchema = z.object({
   jobId: z.string().uuid(),
-  reviewedCardsData: z.array(z.object({
-    front: z.string().min(1, "Front text is required").max(1000, "Front text is too long"),
-    back: z.string().min(1, "Back text is required").max(1000, "Back text is too long"),
-    type: z.enum(["qa", "cloze"]).default("qa"),
-  })).min(1, "At least one card is required").max(100, "Too many cards"),
-  targetDeck: z.object({
-    id: z.string().uuid().optional(),
-    name: z.string().min(1, "Deck name is required").max(100, "Deck name is too long").optional(),
-  }).refine((data) => data.id || data.name, {
-    message: "Either deck ID or name must be provided",
-  }),
+  reviewedCardsData: z
+    .array(
+      z.object({
+        front: z
+          .string()
+          .min(1, "Front text is required")
+          .max(1000, "Front text is too long"),
+        back: z
+          .string()
+          .min(1, "Back text is required")
+          .max(1000, "Back text is too long"),
+        type: z.enum(["qa", "cloze"]).default("qa"),
+      })
+    )
+    .min(1, "At least one card is required")
+    .max(100, "Too many cards"),
+  targetDeck: z
+    .object({
+      id: z.string().uuid().optional(),
+      name: z
+        .string()
+        .min(1, "Deck name is required")
+        .max(100, "Deck name is too long")
+        .optional(),
+    })
+    .refine((data) => data.id || data.name, {
+      message: "Either deck ID or name must be provided",
+    }),
 });
 
 export async function reviewCardsAction(
@@ -174,17 +191,19 @@ export async function reviewCardsAction(
       }
 
       // Prepare flashcard data
-      const preparedFlashcards = validatedData.reviewedCardsData.map((card) => ({
-        deckId: finalDeckId,
-        userId,
-        front: card.front,
-        back: card.back,
-        cardType: card.type || "qa",
-        srsLevel: 0,
-        srsInterval: 0,
-        srsEaseFactor: "2.50",
-        srsDueDate: new Date(),
-      }));
+      const preparedFlashcards = validatedData.reviewedCardsData.map(
+        (card) => ({
+          deckId: finalDeckId,
+          userId,
+          front: card.front,
+          back: card.back,
+          cardType: card.type || "qa",
+          srsLevel: 0,
+          srsInterval: 0,
+          srsEaseFactor: "2.50",
+          srsDueDate: new Date(),
+        })
+      );
 
       // Insert flashcards
       await tx.insert(flashcards).values(preparedFlashcards);
@@ -222,4 +241,4 @@ export async function reviewCardsAction(
       message: error instanceof Error ? error.message : "Failed to save cards",
     };
   }
-} 
+}

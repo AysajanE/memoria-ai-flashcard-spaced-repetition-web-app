@@ -9,7 +9,9 @@ import { calculateSrsData, type StudyRating } from "@/lib/srs";
 
 const CARDS_PER_SESSION = 20;
 
-export async function getDeckStudySessionAction(deckId: string): Promise<ActionState<{ deckName: string; cards: Flashcard[] }>> {
+export async function getDeckStudySessionAction(
+  deckId: string
+): Promise<ActionState<{ deckName: string; cards: Flashcard[] }>> {
   try {
     const { userId } = auth();
     if (!userId) {
@@ -23,10 +25,7 @@ export async function getDeckStudySessionAction(deckId: string): Promise<ActionS
 
     // Query deck name and verify ownership
     const deck = await db.query.decks.findFirst({
-      where: and(
-        eq(decks.id, deckId),
-        eq(decks.userId, userId)
-      ),
+      where: and(eq(decks.id, deckId), eq(decks.userId, userId)),
       columns: {
         name: true,
       },
@@ -73,7 +72,7 @@ export async function recordStudyRatingAction(
     if (!userId) {
       return {
         isSuccess: false,
-        message: "You must be logged in to record study ratings."
+        message: "You must be logged in to record study ratings.",
       };
     }
 
@@ -84,8 +83,8 @@ export async function recordStudyRatingAction(
         message: "Missing required fields.",
         error: {
           flashcardId: ["Flashcard ID is required"],
-          rating: ["Rating is required"]
-        }
+          rating: ["Rating is required"],
+        },
       };
     }
 
@@ -98,7 +97,7 @@ export async function recordStudyRatingAction(
     if (!currentCard) {
       return {
         isSuccess: false,
-        message: "Flashcard not found."
+        message: "Flashcard not found.",
       };
     }
 
@@ -106,7 +105,7 @@ export async function recordStudyRatingAction(
     if (currentCard.userId !== userId) {
       return {
         isSuccess: false,
-        message: "You don't have permission to update this flashcard."
+        message: "You don't have permission to update this flashcard.",
       };
     }
 
@@ -117,27 +116,34 @@ export async function recordStudyRatingAction(
     );
 
     // Get current user stats
-    const [user] = await db
-      .select()
-      .from(users)
-      .where(eq(users.id, userId));
+    const [user] = await db.select().from(users).where(eq(users.id, userId));
 
     if (!user) {
       return {
         isSuccess: false,
-        message: "User not found."
+        message: "User not found.",
       };
     }
 
     // Use UTC dates for consistent timezone handling
     const now = new Date();
     // Get current date in UTC (year, month, day only)
-    const todayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-    
+    const todayUTC = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
+    );
+
     // Get last studied date in UTC
-    const lastStudiedDate = user.lastStudiedAt ? new Date(user.lastStudiedAt) : null;
-    const lastStudiedDayUTC = lastStudiedDate 
-      ? new Date(Date.UTC(lastStudiedDate.getUTCFullYear(), lastStudiedDate.getUTCMonth(), lastStudiedDate.getUTCDate()))
+    const lastStudiedDate = user.lastStudiedAt
+      ? new Date(user.lastStudiedAt)
+      : null;
+    const lastStudiedDayUTC = lastStudiedDate
+      ? new Date(
+          Date.UTC(
+            lastStudiedDate.getUTCFullYear(),
+            lastStudiedDate.getUTCMonth(),
+            lastStudiedDate.getUTCDate()
+          )
+        )
       : null;
 
     // Calculate streak
@@ -149,8 +155,10 @@ export async function recordStudyRatingAction(
       // Already studied today, streak remains the same
     } else {
       // Calculate day difference using UTC timestamps
-      const dayDiff = (todayUTC.getTime() - lastStudiedDayUTC.getTime()) / (24 * 60 * 60 * 1000);
-      
+      const dayDiff =
+        (todayUTC.getTime() - lastStudiedDayUTC.getTime()) /
+        (24 * 60 * 60 * 1000);
+
       if (dayDiff === 1) {
         // Studied yesterday, increment streak
         newStreak += 1;
@@ -161,27 +169,32 @@ export async function recordStudyRatingAction(
     }
 
     // Reset daily count if it's a new day (using UTC comparison)
-    const dailyCount = lastStudiedDayUTC?.getTime() === todayUTC.getTime() 
-      ? user.dailyStudyCount + 1 
-      : 1;
+    const dailyCount =
+      lastStudiedDayUTC?.getTime() === todayUTC.getTime()
+        ? user.dailyStudyCount + 1
+        : 1;
 
     // Reset weekly count if it's a new week (using UTC)
     const weekStartUTC = new Date(todayUTC);
     weekStartUTC.setUTCDate(todayUTC.getUTCDate() - todayUTC.getUTCDay());
-    
-    const lastWeekStartUTC = lastStudiedDayUTC 
-      ? new Date(Date.UTC(
-          lastStudiedDayUTC.getUTCFullYear(), 
-          lastStudiedDayUTC.getUTCMonth(), 
-          lastStudiedDayUTC.getUTCDate() - lastStudiedDayUTC.getUTCDay()))
+
+    const lastWeekStartUTC = lastStudiedDayUTC
+      ? new Date(
+          Date.UTC(
+            lastStudiedDayUTC.getUTCFullYear(),
+            lastStudiedDayUTC.getUTCMonth(),
+            lastStudiedDayUTC.getUTCDate() - lastStudiedDayUTC.getUTCDay()
+          )
+        )
       : null;
-    
-    const weeklyCount = lastWeekStartUTC?.getTime() === weekStartUTC.getTime()
-      ? user.weeklyStudyCount + 1
-      : 1;
+
+    const weeklyCount =
+      lastWeekStartUTC?.getTime() === weekStartUTC.getTime()
+        ? user.weeklyStudyCount + 1
+        : 1;
 
     // Update accuracy (Good/Easy ratings count as correct)
-    const isCorrect = rating === 'Good' || rating === 'Easy';
+    const isCorrect = rating === "Good" || rating === "Easy";
 
     // Update database in a transaction
     await db.transaction(async (tx) => {
@@ -192,7 +205,7 @@ export async function recordStudyRatingAction(
           srsInterval: newInterval,
           srsEaseFactor: newEaseFactor,
           srsDueDate: newDueDate,
-          updatedAt: now
+          updatedAt: now,
         })
         .where(eq(flashcards.id, flashcardId));
 
@@ -203,23 +216,25 @@ export async function recordStudyRatingAction(
           dailyStudyCount: dailyCount,
           weeklyStudyCount: weeklyCount,
           totalReviews: db.sql`${users.totalReviews} + 1`,
-          totalCorrectReviews: isCorrect ? db.sql`${users.totalCorrectReviews} + 1` : users.totalCorrectReviews,
+          totalCorrectReviews: isCorrect
+            ? db.sql`${users.totalCorrectReviews} + 1`
+            : users.totalCorrectReviews,
           consecutiveStudyDays: newStreak,
           lastStudiedAt: now,
-          updatedAt: now
+          updatedAt: now,
         })
         .where(eq(users.id, userId));
     });
 
     return {
       isSuccess: true,
-      message: "Study rating recorded successfully."
+      message: "Study rating recorded successfully.",
     };
   } catch (error) {
     console.error("Error recording study rating:", error);
     return {
       isSuccess: false,
-      message: "Failed to record study rating. Please try again."
+      message: "Failed to record study rating. Please try again.",
     };
   }
-} 
+}

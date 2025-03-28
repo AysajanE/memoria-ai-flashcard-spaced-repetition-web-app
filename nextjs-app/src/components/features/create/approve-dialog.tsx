@@ -30,7 +30,11 @@ interface ApproveDialogProps {
   onSubmit: (targetDeck: { id?: string; name?: string }) => void;
 }
 
-export function ApproveDialog({ isOpen, setIsOpen, onSubmit }: ApproveDialogProps) {
+export function ApproveDialog({
+  isOpen,
+  setIsOpen,
+  onSubmit,
+}: ApproveDialogProps) {
   const [decks, setDecks] = useState<Deck[]>([]);
   const [selectedDeckId, setSelectedDeckId] = useState<string>();
   const [newDeckName, setNewDeckName] = useState("");
@@ -86,7 +90,8 @@ export function ApproveDialog({ isOpen, setIsOpen, onSubmit }: ApproveDialogProp
         <DialogHeader>
           <DialogTitle>Approve & Assign Cards</DialogTitle>
           <DialogDescription>
-            Select an existing deck or create a new one to store your flashcards.
+            Select an existing deck or create a new one to store your
+            flashcards.
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-4 py-4">
@@ -102,7 +107,13 @@ export function ApproveDialog({ isOpen, setIsOpen, onSubmit }: ApproveDialogProp
               disabled={isLoadingDecks || isPending}
             >
               <SelectTrigger id="deck-select">
-                <SelectValue placeholder={isLoadingDecks ? "Loading decks..." : "Select existing deck..."} />
+                <SelectValue
+                  placeholder={
+                    isLoadingDecks
+                      ? "Loading decks..."
+                      : "Select existing deck..."
+                  }
+                />
               </SelectTrigger>
               <SelectContent>
                 {decks.map((deck) => (
@@ -127,9 +138,7 @@ export function ApproveDialog({ isOpen, setIsOpen, onSubmit }: ApproveDialogProp
               disabled={isPending}
             />
           </div>
-          {error && (
-            <p className="text-sm text-destructive">{error}</p>
-          )}
+          {error && <p className="text-destructive text-sm">{error}</p>}
         </div>
         <DialogFooter>
           <Button
@@ -145,7 +154,7 @@ export function ApproveDialog({ isOpen, setIsOpen, onSubmit }: ApproveDialogProp
           >
             {isPending ? (
               <>
-                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 Assigning Cards...
               </>
             ) : (
@@ -156,4 +165,4 @@ export function ApproveDialog({ isOpen, setIsOpen, onSubmit }: ApproveDialogProp
       </DialogContent>
     </Dialog>
   );
-} 
+}

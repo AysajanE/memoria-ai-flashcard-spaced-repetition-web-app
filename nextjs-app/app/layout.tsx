@@ -18,7 +18,8 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Memoria - AI-Powered Flashcard Creation",
-  description: "Transform your learning materials into effective spaced repetition flashcards using AI.",
+  description:
+    "Transform your learning materials into effective spaced repetition flashcards using AI.",
 };
 
 export default function RootLayout({
@@ -28,7 +29,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen bg-background`}>
+      <body
+        className={`${geistSans.variable} ${geistMono.variable} bg-background min-h-screen antialiased`}
+      >
         <ClerkProvider>
           <ThemeProvider
             attribute="class"

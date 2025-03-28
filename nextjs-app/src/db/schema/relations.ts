@@ -1,8 +1,8 @@
-import { relations } from 'drizzle-orm';
-import { users } from './users';
-import { decks } from './decks';
-import { flashcards } from './flashcards';
-import { processingJobs } from './processingJobs';
+import { relations } from "drizzle-orm";
+import { users } from "./users";
+import { decks } from "./decks";
+import { flashcards } from "./flashcards";
+import { processingJobs } from "./processingJobs";
 
 export const usersRelations = relations(users, ({ many }) => ({
   decks: many(decks),
@@ -34,4 +34,4 @@ export const processingJobsRelations = relations(processingJobs, ({ one }) => ({
     fields: [processingJobs.userId],
     references: [users.id],
   }),
-})); 
+}));

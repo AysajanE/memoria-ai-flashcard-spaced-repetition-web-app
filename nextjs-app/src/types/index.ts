@@ -8,7 +8,7 @@ export type ActionState<TData = undefined> = {
 export interface FlashcardData {
   front: string;
   back: string;
-  type?: 'qa' | 'cloze';
+  type?: "qa" | "cloze";
 }
 
 export interface Deck {
@@ -25,11 +25,11 @@ export interface Flashcard {
   userId: string;
   front: string;
   back: string;
-  cardType: 'qa' | 'cloze';
+  cardType: "qa" | "cloze";
   srsLevel: number;
   srsInterval: number;
   srsEaseFactor: number;
   srsDueDate: Date;
   createdAt: Date;
   updatedAt: Date;
-} 
+}

@@ -16,14 +16,16 @@ interface StatsDisplayProps {
 export function StatsDisplay({ stats, className }: StatsDisplayProps) {
   if (!stats) {
     return (
-      <div className={cn("grid gap-4 md:grid-cols-2 lg:grid-cols-4", className)}>
+      <div
+        className={cn("grid gap-4 md:grid-cols-2 lg:grid-cols-4", className)}
+      >
         {[...Array(4)].map((_, i) => (
           <Card key={i} className="animate-pulse">
             <CardHeader className="space-y-1">
-              <CardTitle className="h-4 w-24 bg-muted rounded" />
+              <CardTitle className="bg-muted h-4 w-24 rounded" />
             </CardHeader>
             <CardContent>
-              <div className="h-8 w-16 bg-muted rounded" />
+              <div className="bg-muted h-8 w-16 rounded" />
             </CardContent>
           </Card>
         ))}
@@ -35,7 +37,7 @@ export function StatsDisplay({ stats, className }: StatsDisplayProps) {
     <div className={cn("grid gap-4 md:grid-cols-2 lg:grid-cols-4", className)}>
       <Card>
         <CardHeader className="space-y-1">
-          <CardTitle className="text-sm font-medium text-muted-foreground">
+          <CardTitle className="text-muted-foreground text-sm font-medium">
             Cards Studied Today
           </CardTitle>
         </CardHeader>
@@ -46,7 +48,7 @@ export function StatsDisplay({ stats, className }: StatsDisplayProps) {
 
       <Card>
         <CardHeader className="space-y-1">
-          <CardTitle className="text-sm font-medium text-muted-foreground">
+          <CardTitle className="text-muted-foreground text-sm font-medium">
             Cards Studied This Week
           </CardTitle>
         </CardHeader>
@@ -57,7 +59,7 @@ export function StatsDisplay({ stats, className }: StatsDisplayProps) {
 
       <Card>
         <CardHeader className="space-y-1">
-          <CardTitle className="text-sm font-medium text-muted-foreground">
+          <CardTitle className="text-muted-foreground text-sm font-medium">
             Overall Accuracy
           </CardTitle>
         </CardHeader>
@@ -68,7 +70,7 @@ export function StatsDisplay({ stats, className }: StatsDisplayProps) {
 
       <Card>
         <CardHeader className="space-y-1">
-          <CardTitle className="text-sm font-medium text-muted-foreground">
+          <CardTitle className="text-muted-foreground text-sm font-medium">
             Current Study Streak
           </CardTitle>
         </CardHeader>
@@ -78,4 +80,4 @@ export function StatsDisplay({ stats, className }: StatsDisplayProps) {
       </Card>
     </div>
   );
-} 
+}

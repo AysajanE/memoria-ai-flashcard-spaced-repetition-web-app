@@ -29,7 +29,7 @@ export default function CreatePage() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    
+
     if (!text.trim()) {
       setError("Please enter some text to generate cards from");
       return;
@@ -48,7 +48,8 @@ export default function CreatePage() {
         toast.success(result.message);
         router.push(`/create/${result.data.jobId}`);
       } else {
-        const errorMessage = result.message || "Failed to start card generation";
+        const errorMessage =
+          result.message || "Failed to start card generation";
         setError(errorMessage);
         toast.error(errorMessage);
       }
@@ -60,9 +61,9 @@ export default function CreatePage() {
       <Card className="p-6">
         <div className="space-y-6">
           <div>
-            <h1 className="text-2xl font-bold mb-2">Create Flashcards</h1>
+            <h1 className="mb-2 text-2xl font-bold">Create Flashcards</h1>
             <p className="text-muted-foreground">
-              Enter your text below and we'll generate flashcards using AI.
+              Enter your text below and we&apos;ll generate flashcards using AI.
             </p>
           </div>
 
@@ -77,15 +78,17 @@ export default function CreatePage() {
                 className="min-h-[200px]"
                 disabled={isPending}
               />
-              {error && (
-                <p className="text-sm text-destructive">{error}</p>
-              )}
+              {error && <p className="text-destructive text-sm">{error}</p>}
             </div>
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="model">AI Model</Label>
-                <Select value={model} onValueChange={setModel} disabled={isPending}>
+                <Select
+                  value={model}
+                  onValueChange={setModel}
+                  disabled={isPending}
+                >
                   <SelectTrigger id="model">
                     <SelectValue placeholder="Select model" />
                   </SelectTrigger>
@@ -98,7 +101,11 @@ export default function CreatePage() {
 
               <div className="space-y-2">
                 <Label htmlFor="cardType">Card Type</Label>
-                <Select value={cardType} onValueChange={setCardType} disabled={isPending}>
+                <Select
+                  value={cardType}
+                  onValueChange={setCardType}
+                  disabled={isPending}
+                >
                   <SelectTrigger id="cardType">
                     <SelectValue placeholder="Select type" />
                   </SelectTrigger>
@@ -112,7 +119,11 @@ export default function CreatePage() {
 
             <div className="space-y-2">
               <Label htmlFor="numCards">Number of Cards</Label>
-              <Select value={numCards} onValueChange={setNumCards} disabled={isPending}>
+              <Select
+                value={numCards}
+                onValueChange={setNumCards}
+                disabled={isPending}
+              >
                 <SelectTrigger id="numCards">
                   <SelectValue placeholder="Select number" />
                 </SelectTrigger>
@@ -129,7 +140,7 @@ export default function CreatePage() {
             <Button type="submit" disabled={isPending} className="w-full">
               {isPending ? (
                 <>
-                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   Generating Cards...
                 </>
               ) : (
@@ -141,4 +152,4 @@ export default function CreatePage() {
       </Card>
     </div>
   );
-} 
+}

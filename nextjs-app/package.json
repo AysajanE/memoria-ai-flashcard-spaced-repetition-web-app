@@ -6,7 +6,7 @@
     "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "eslint .",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,md,json}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,md,json}\"",
     "db:generate": "drizzle-kit generate --config=./drizzle.config.ts",

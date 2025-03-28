@@ -6,7 +6,7 @@ export default async function DashboardPage() {
   const statsResult = await getUserStatsAction();
 
   return (
-    <div className="container py-6 space-y-6">
+    <div className="container space-y-6 py-6">
       <PageHeader
         heading="Dashboard"
         description="Track your learning progress and recent activity."
@@ -14,13 +14,15 @@ export default async function DashboardPage() {
 
       <div className="space-y-6">
         <section>
-          <h2 className="text-lg font-semibold mb-4">Your Progress</h2>
-          <StatsDisplay stats={statsResult.isSuccess ? statsResult.data : null} />
+          <h2 className="mb-4 text-lg font-semibold">Your Progress</h2>
+          <StatsDisplay
+            stats={statsResult.isSuccess ? statsResult.data : null}
+          />
         </section>
 
         {/* Placeholder for recent activity - to be implemented */}
         <section>
-          <h2 className="text-lg font-semibold mb-4">Recent Activity</h2>
+          <h2 className="mb-4 text-lg font-semibold">Recent Activity</h2>
           <div className="text-muted-foreground">
             Recent activity will be displayed here.
           </div>
@@ -28,4 +30,4 @@ export default async function DashboardPage() {
       </div>
     </div>
   );
-} 
+}

@@ -3,7 +3,10 @@
 import { useEffect, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Flashcard } from "@/types";
-import { getDeckStudySessionAction, recordStudyRatingAction } from "@/actions/study";
+import {
+  getDeckStudySessionAction,
+  recordStudyRatingAction,
+} from "@/actions/study";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
@@ -27,7 +30,7 @@ export default function StudyPage({ params }: { params: { deckId: string } }) {
 
       try {
         const result = await getDeckStudySessionAction(params.deckId);
-        
+
         if (!result.isSuccess) {
           setError(result.message);
           toast.error(result.message || "Failed to load study session");
@@ -52,11 +55,14 @@ export default function StudyPage({ params }: { params: { deckId: string } }) {
 
   const handleRating = async (rating: "again" | "hard" | "good" | "easy") => {
     if (!studyCards[currentCardIndex]) return;
-    
+
     setIsRating(true);
     try {
-      const result = await recordStudyRatingAction(studyCards[currentCardIndex].id, rating);
-      
+      const result = await recordStudyRatingAction(
+        studyCards[currentCardIndex].id,
+        rating
+      );
+
       if (!result.isSuccess) {
         toast.error(result.message || "Failed to record rating");
         return;
@@ -85,7 +91,7 @@ export default function StudyPage({ params }: { params: { deckId: string } }) {
       <div className="container max-w-2xl py-8">
         <Card className="p-6">
           <div className="flex flex-col items-center justify-center space-y-4">
-            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            <Loader2 className="text-primary h-8 w-8 animate-spin" />
             <p className="text-muted-foreground">Loading study session...</p>
           </div>
         </Card>
@@ -99,7 +105,9 @@ export default function StudyPage({ params }: { params: { deckId: string } }) {
         <Card className="p-6">
           <div className="flex flex-col items-center justify-center space-y-4">
             <p className="text-destructive text-center">{error}</p>
-            <Button onClick={() => router.push("/decks")}>Return to Decks</Button>
+            <Button onClick={() => router.push("/decks")}>
+              Return to Decks
+            </Button>
           </div>
         </Card>
       </div>
@@ -115,7 +123,9 @@ export default function StudyPage({ params }: { params: { deckId: string } }) {
             <p className="text-muted-foreground text-center">
               There are no cards due for review in this deck.
             </p>
-            <Button onClick={() => router.push("/decks")}>Return to Decks</Button>
+            <Button onClick={() => router.push("/decks")}>
+              Return to Decks
+            </Button>
           </div>
         </Card>
       </div>
@@ -129,9 +139,11 @@ export default function StudyPage({ params }: { params: { deckId: string } }) {
           <div className="flex flex-col items-center justify-center space-y-4">
             <h2 className="text-2xl font-bold">Session Complete!</h2>
             <p className="text-muted-foreground text-center">
-              Great job! You've completed all cards in this session.
+              Great job! You&apos;ve completed all cards in this session.
             </p>
-            <Button onClick={() => router.push("/decks")}>Return to Decks</Button>
+            <Button onClick={() => router.push("/decks")}>
+              Return to Decks
+            </Button>
           </div>
         </Card>
       </div>
@@ -145,7 +157,9 @@ export default function StudyPage({ params }: { params: { deckId: string } }) {
         <Card className="p-6">
           <div className="flex flex-col items-center justify-center space-y-4">
             <p className="text-muted-foreground">No cards to study.</p>
-            <Button onClick={() => router.push("/decks")}>Return to Decks</Button>
+            <Button onClick={() => router.push("/decks")}>
+              Return to Decks
+            </Button>
           </div>
         </Card>
       </div>
@@ -158,18 +172,18 @@ export default function StudyPage({ params }: { params: { deckId: string } }) {
         <div className="space-y-6">
           <div className="flex items-center justify-between">
             <h1 className="text-2xl font-bold">{deckName}</h1>
-            <div className="text-sm text-muted-foreground">
+            <div className="text-muted-foreground text-sm">
               Card {currentCardIndex + 1} of {studyCards.length}
             </div>
           </div>
 
           <div className="space-y-4">
-            <div className="min-h-[200px] flex items-center justify-center p-4 border rounded-lg">
+            <div className="flex min-h-[200px] items-center justify-center rounded-lg border p-4">
               <p className="text-lg">{currentCard.front}</p>
             </div>
 
             {isShowingAnswer && (
-              <div className="min-h-[200px] flex items-center justify-center p-4 border rounded-lg bg-muted/50">
+              <div className="bg-muted/50 flex min-h-[200px] items-center justify-center rounded-lg border p-4">
                 <p className="text-lg">{currentCard.back}</p>
               </div>
             )}
@@ -194,7 +208,7 @@ export default function StudyPage({ params }: { params: { deckId: string } }) {
                   disabled={isRating}
                 >
                   {isRating ? (
-                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   ) : null}
                   Again
                 </Button>
@@ -205,7 +219,7 @@ export default function StudyPage({ params }: { params: { deckId: string } }) {
                   disabled={isRating}
                 >
                   {isRating ? (
-                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   ) : null}
                   Hard
                 </Button>
@@ -216,7 +230,7 @@ export default function StudyPage({ params }: { params: { deckId: string } }) {
                   disabled={isRating}
                 >
                   {isRating ? (
-                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   ) : null}
                   Good
                 </Button>
@@ -227,7 +241,7 @@ export default function StudyPage({ params }: { params: { deckId: string } }) {
                   disabled={isRating}
                 >
                   {isRating ? (
-                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   ) : null}
                   Easy
                 </Button>
@@ -238,4 +252,4 @@ export default function StudyPage({ params }: { params: { deckId: string } }) {
       </Card>
     </div>
   );
-} 
+}
