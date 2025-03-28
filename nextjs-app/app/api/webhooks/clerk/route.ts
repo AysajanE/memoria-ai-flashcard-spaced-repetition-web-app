@@ -43,13 +43,15 @@ export async function POST(req: Request) {
   if (eventType === "user.created") {
     const { id, email_addresses, created_at, updated_at } = evt.data;
 
-    // Get the primary email address
+    // Get the first valid email address
+    // In Clerk API, email_addresses is an array and we need to find a valid one
     const primaryEmail = email_addresses.find(
-      (email) => email.primary
+      (email) => email.email_address && email.email_address.includes('@')
     )?.email_address;
+    
     if (!primaryEmail) {
-      console.error("No primary email found for user:", id);
-      return new NextResponse("No primary email found", { status: 400 });
+      console.error("No valid email found for user:", id);
+      return new NextResponse("No valid email found", { status: 400 });
     }
 
     try {
