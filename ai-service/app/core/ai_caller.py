@@ -4,12 +4,15 @@ from typing import Optional
 
 import openai
 from openai import AsyncOpenAI
-from openai.types.error import Timeout as APITimeoutError
-from openai.types.error import RateLimitError
-from openai.types.error import APIConnectionError
-from openai.types.error import AuthenticationError
-from openai.types.error import BadRequestError as InvalidRequestError
-from openai.types.error import APIError
+# Updated imports for OpenAI v1.x
+from openai import (
+    APITimeoutError,
+    RateLimitError,
+    APIConnectionError,
+    AuthenticationError,
+    BadRequestError,
+    APIError
+)
 
 from app.config import settings
 
@@ -76,7 +79,7 @@ async def generate_cards_with_ai(
                 )
                 return response.choices[0].message.content
                 
-            except InvalidRequestError as e:
+            except BadRequestError as e:
                 if "maximum context length" in str(e).lower():
                     raise TokenLimitError(f"Input exceeds model's token limit: {str(e)}")
                 raise AIServiceError(f"Invalid request to AI service: {str(e)}")
