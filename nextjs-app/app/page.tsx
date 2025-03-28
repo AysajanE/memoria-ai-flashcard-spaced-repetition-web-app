@@ -1,4 +1,15 @@
-export default function Home() {
+import { redirect } from "next/navigation";
+import { currentUser } from "@clerk/nextjs";
+
+export default async function Home() {
+  // Check if user is authenticated
+  const user = await currentUser();
+  
+  // If user is authenticated, redirect to dashboard
+  if (user) {
+    redirect("/dashboard");
+  }
+
   return (
     <div className="flex flex-col items-center justify-center min-h-screen p-8">
       <h1 className="text-3xl font-bold mb-6">Welcome to Memoria</h1>
