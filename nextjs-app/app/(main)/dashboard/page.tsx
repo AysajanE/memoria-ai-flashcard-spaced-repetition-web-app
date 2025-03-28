@@ -16,7 +16,7 @@ export default async function DashboardPage() {
         <section>
           <h2 className="mb-4 text-lg font-semibold">Your Progress</h2>
           <StatsDisplay
-            stats={statsResult.isSuccess ? statsResult.data : null}
+            stats={statsResult.isSuccess && statsResult.data ? statsResult.data : null}
           />
         </section>
 
