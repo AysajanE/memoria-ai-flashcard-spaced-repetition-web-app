@@ -1,11 +1,12 @@
 import { pgTable, text, timestamp, jsonb, pgEnum, index } from 'drizzle-orm/pg-core';
 import { users } from './users';
+import { sql } from 'drizzle-orm';
 
 export const jobStatusEnum = pgEnum('job_status', ['pending', 'processing', 'completed', 'failed']);
 export const jobTypeEnum = pgEnum('job_type', ['generate-cards']);
 
 export const processingJobs = pgTable('processing_jobs', {
-  id: text('id').primaryKey(),
+  id: text('id').primaryKey().default(sql`uuid_generate_v4()`),
   userId: text('user_id').references(() => users.id, { onDelete: 'set null' }),
   status: jobStatusEnum('status').default('pending').notNull(),
   jobType: jobTypeEnum('job_type').default('generate-cards').notNull(), // AI card generation

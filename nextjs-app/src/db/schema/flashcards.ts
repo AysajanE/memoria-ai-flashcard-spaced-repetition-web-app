@@ -10,11 +10,12 @@ import {
 import { users } from "./users";
 import { decks } from "./decks";
 import { cardTypeEnum } from "./cardTypes";
+import { sql } from "drizzle-orm";
 
 export const flashcards = pgTable(
   "flashcards",
   {
-    id: uuid("id").primaryKey().defaultRandom(),
+    id: uuid("id").primaryKey().default(sql`uuid_generate_v4()`),
     deckId: uuid("deck_id")
       .references(() => decks.id, { onDelete: "cascade" })
       .notNull(),

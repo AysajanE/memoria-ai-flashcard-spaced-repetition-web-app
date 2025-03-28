@@ -8,6 +8,7 @@ import {
   index,
 } from "drizzle-orm/pg-core";
 import { users } from "./users";
+import { sql } from "drizzle-orm";
 
 export const jobTypeEnum = pgEnum("job_type", ["generate-cards"]);
 export const jobStatusEnum = pgEnum("job_status", [
@@ -20,7 +21,7 @@ export const jobStatusEnum = pgEnum("job_status", [
 export const processingJobs = pgTable(
   "processing_jobs",
   {
-    id: uuid("id").primaryKey().defaultRandom(),
+    id: uuid("id").primaryKey().default(sql`uuid_generate_v4()`),
     userId: text("user_id").references(() => users.id, {
       onDelete: "set null",
     }),

@@ -2,11 +2,12 @@ import { pgTable, text, timestamp, index, pgEnum } from 'drizzle-orm/pg-core';
 import { users } from './users';
 import { decks } from './decks';
 import { processingJobs } from './processingJobs';
+import { sql } from 'drizzle-orm';
 
 export const cardTypeEnum = pgEnum('card_type', ['basic', 'cloze']);
 
 export const flashcards = pgTable('flashcards', {
-  id: text('id').primaryKey().defaultRandom(), // UUID
+  id: text('id').primaryKey().default(sql`uuid_generate_v4()`), // UUID
   userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
   deckId: text('deck_id').references(() => decks.id, { onDelete: 'cascade' }),
   jobId: text('job_id').references(() => processingJobs.id, { onDelete: 'set null' }),
