@@ -44,6 +44,8 @@ python -m app.main
 - **Authentication**: Clerk
 - **Database**: PostgreSQL with Drizzle ORM
 - **AI Processing**: Python FastAPI service using OpenAI/Claude APIs
+  - Synchronized type definitions between frontend and backend
+  - Configurable card generation (type, count, model)
 
 ### Database Schema
 

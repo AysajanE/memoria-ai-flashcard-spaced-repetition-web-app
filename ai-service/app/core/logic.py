@@ -98,8 +98,12 @@ async def process_card_generation(
     job_id: str,
     input_text: str,
     model: str,
-    start_time: float
+    card_type: str = "qa",
+    num_cards: int = 10,
+    start_time: float = None
 ) -> None:
+    """Process card generation with more control over card type and count"""
+    start_time = start_time or time.time()
     """Process card generation and send webhook with retries"""
     try:
         # Check input token limit
@@ -113,11 +117,13 @@ async def process_card_generation(
             logger.warning(error_msg)
             raise TokenLimitError(error_msg)
 
-        # Generate cards using AI
+        # Generate cards using AI with all parameters
         result = await generate_cards_with_ai(
             text=input_text,
             model_name=model,
-            system_prompt=settings.DEFAULT_SYSTEM_PROMPT
+            system_prompt=settings.DEFAULT_SYSTEM_PROMPT,
+            card_type=card_type,
+            num_cards=num_cards
         )
         
         # Parse and validate AI response

@@ -41,6 +41,8 @@ async def generate_cards_with_ai(
     text: str,
     model_name: str,
     system_prompt: str,
+    card_type: str = "qa",
+    num_cards: int = 10,
     max_retries: int = 3,
     retry_delay: float = 1.0
 ) -> str:
@@ -62,9 +64,16 @@ async def generate_cards_with_ai(
         AIServiceError: For other AI service errors
     """
     try:
+        # Adjust system prompt to include card type and count
+        adjusted_prompt = system_prompt
+        if "{card_type}" in system_prompt:
+            adjusted_prompt = system_prompt.replace("{card_type}", card_type)
+        if "{num_cards}" in system_prompt:
+            adjusted_prompt = adjusted_prompt.replace("{num_cards}", str(num_cards))
+            
         # Prepare messages
         messages = [
-            {"role": "system", "content": system_prompt},
+            {"role": "system", "content": adjusted_prompt},
             {"role": "user", "content": text}
         ]
         

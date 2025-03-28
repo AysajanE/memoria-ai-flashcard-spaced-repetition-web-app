@@ -7,6 +7,7 @@ export const GenerateCardsRequestSchema = z.object({
   model: z.enum(["gpt-4", "gpt-3.5-turbo", "claude-3-opus-20240229", "claude-3-sonnet-20240229"]).optional(),
   cardType: z.enum(["qa", "cloze"]).optional(),
   numCards: z.number().min(1).max(50).optional(),
+  config: z.record(z.any()).optional(),
 });
 
 export type GenerateCardsRequest = z.infer<typeof GenerateCardsRequestSchema>;
@@ -17,7 +18,13 @@ export interface GenerateCardsResponse {
   jobId: string;
 }
 
-export async function triggerCardGeneration(payload: { jobId: string; text: string }): Promise<void> {
+export async function triggerCardGeneration(payload: { 
+  jobId: string; 
+  text: string;
+  model?: string;
+  cardType?: "qa" | "cloze";
+  numCards?: number;
+}): Promise<void> {
   const baseUrl = process.env.AI_SERVICE_BASE_URL;
   const apiKey = process.env.INTERNAL_API_KEY;
 
@@ -30,9 +37,15 @@ export async function triggerCardGeneration(payload: { jobId: string; text: stri
     const fullPayload = {
       jobId: payload.jobId,
       text: payload.text,
-      model: "gpt-4", // Default model
-      cardType: "qa", // Default card type
-      numCards: 10, // Default number of cards
+      model: payload.model || "gpt-4",
+      cardType: payload.cardType || "qa",
+      numCards: payload.numCards || 10,
+      // Include config object for backward compatibility
+      config: {
+        model: payload.model || "gpt-4",
+        cardType: payload.cardType || "qa",
+        numCards: payload.numCards || 10
+      }
     };
 
     const response = await fetch(`${baseUrl}/api/v1/generate-cards`, {

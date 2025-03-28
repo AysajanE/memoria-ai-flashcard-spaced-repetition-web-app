@@ -21,18 +21,26 @@ async def process_ai_job(job_id: str, input_data: Dict[str, Any]) -> None:
         input_data: Dictionary containing job input data
     """
     try:
-        # Extract input text and model
+        # Extract input text - required
         text = input_data.get("text")
-        model = input_data.get("config", {}).get("model", "gpt-3.5-turbo")
-        
         if not text:
             raise ValueError("No text provided in input data")
+        
+        # Extract other parameters, prioritizing direct fields over config
+        model = input_data.get("model") or input_data.get("config", {}).get("model", "gpt-3.5-turbo")
+        card_type = input_data.get("cardType") or input_data.get("config", {}).get("cardType", "qa")
+        num_cards = input_data.get("numCards") or input_data.get("config", {}).get("numCards", 10)
+        
+        # Ensure num_cards is within reasonable limits
+        num_cards = max(1, min(int(num_cards), 50))
             
-        # Process card generation
+        # Process card generation with all parameters
         await process_card_generation(
             job_id=job_id,
             input_text=text,
             model=model,
+            card_type=card_type,
+            num_cards=num_cards,
             start_time=time.time()
         )
         
