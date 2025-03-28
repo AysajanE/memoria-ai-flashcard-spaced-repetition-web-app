@@ -47,7 +47,7 @@ export async function submitTextForCardsAction(
       .values({
         userId,
         status: "pending",
-        jobType: "generate_cards",
+        jobType: "generate-cards",
         inputPayload: validatedData,
       })
       .returning();
