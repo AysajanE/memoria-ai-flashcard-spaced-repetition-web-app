@@ -110,9 +110,43 @@ export async function recordStudyRatingAction(
         break;
     }
 
-    // Calculate next due date
+    // Calculate next due date using UTC to avoid timezone issues
     const dueDate = new Date();
-    dueDate.setDate(dueDate.getDate() + newSrsInterval);
+    dueDate.setUTCDate(dueDate.getUTCDate() + newSrsInterval);
+
+    // Also handle streak and stats with UTC for consistency
+    const todayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    
+    // Get user data for stats calculation
+    const userData = await db.query.users.findFirst({
+      where: eq(users.id, userId),
+      columns: {
+        lastStudiedAt: true,
+        dailyStudyCount: true,
+        weeklyStudyCount: true,
+      },
+    });
+    
+    // Calculate whether this is a new study day
+    const lastStudiedAt = userData?.lastStudiedAt ? new Date(userData.lastStudiedAt) : null;
+    const lastStudiedDayUTC = lastStudiedAt
+      ? new Date(Date.UTC(lastStudiedAt.getUTCFullYear(), lastStudiedAt.getUTCMonth(), lastStudiedAt.getUTCDate()))
+      : null;
+    
+    const isNewDay = !lastStudiedDayUTC || lastStudiedDayUTC.getTime() !== todayUTC.getTime();
+    
+    // Calculate whether this is a new week
+    const weekStartUTC = new Date(todayUTC);
+    weekStartUTC.setUTCDate(todayUTC.getUTCDate() - todayUTC.getUTCDay());
+    
+    const lastWeekStartUTC = lastStudiedDayUTC
+      ? new Date(Date.UTC(
+          lastStudiedDayUTC.getUTCFullYear(),
+          lastStudiedDayUTC.getUTCMonth(),
+          lastStudiedDayUTC.getUTCDate() - lastStudiedDayUTC.getUTCDay()))
+      : null;
+    
+    const isNewWeek = !lastWeekStartUTC || lastWeekStartUTC.getTime() !== weekStartUTC.getTime();
 
     // Update flashcard and user stats in a transaction
     await db.transaction(async (tx) => {
@@ -132,8 +166,8 @@ export async function recordStudyRatingAction(
       await tx
         .update(users)
         .set({
-          dailyStudyCount: db.sql`${users.dailyStudyCount} + 1`,
-          weeklyStudyCount: db.sql`${users.weeklyStudyCount} + 1`,
+          dailyStudyCount: isNewDay ? 1 : db.sql`${users.dailyStudyCount} + 1`,
+          weeklyStudyCount: isNewWeek ? 1 : db.sql`${users.weeklyStudyCount} + 1`,
           lastStudiedAt: now,
           updatedAt: now,
         })

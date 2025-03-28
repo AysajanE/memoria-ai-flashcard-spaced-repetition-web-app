@@ -36,12 +36,15 @@ export async function getDeckStudySessionAction(deckId: string): Promise<ActionS
       return { isSuccess: false, message: "Deck not found or access denied" };
     }
 
+    // Get current time for due date comparison
+    const now = new Date();
+
     // Query due cards
     const dueCards = await db.query.flashcards.findMany({
       where: and(
         eq(flashcards.deckId, deckId),
         eq(flashcards.userId, userId),
-        lte(flashcards.srsDueDate, new Date())
+        lte(flashcards.srsDueDate, now)
       ),
       orderBy: asc(flashcards.srsDueDate),
       limit: CARDS_PER_SESSION,
@@ -126,35 +129,54 @@ export async function recordStudyRatingAction(
       };
     }
 
+    // Use UTC dates for consistent timezone handling
     const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    // Get current date in UTC (year, month, day only)
+    const todayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    
+    // Get last studied date in UTC
     const lastStudiedDate = user.lastStudiedAt ? new Date(user.lastStudiedAt) : null;
-    const lastStudiedDay = lastStudiedDate ? new Date(lastStudiedDate.getFullYear(), lastStudiedDate.getMonth(), lastStudiedDate.getDate()) : null;
+    const lastStudiedDayUTC = lastStudiedDate 
+      ? new Date(Date.UTC(lastStudiedDate.getUTCFullYear(), lastStudiedDate.getUTCMonth(), lastStudiedDate.getUTCDate()))
+      : null;
 
     // Calculate streak
     let newStreak = user.consecutiveStudyDays;
-    if (!lastStudiedDay) {
+    if (!lastStudiedDayUTC) {
+      // First time studying
       newStreak = 1;
-    } else if (lastStudiedDay.getTime() === today.getTime()) {
+    } else if (lastStudiedDayUTC.getTime() === todayUTC.getTime()) {
       // Already studied today, streak remains the same
-    } else if (lastStudiedDay.getTime() === today.getTime() - 24 * 60 * 60 * 1000) {
-      // Studied yesterday, increment streak
-      newStreak += 1;
     } else {
-      // Break in streak, reset to 1
-      newStreak = 1;
+      // Calculate day difference using UTC timestamps
+      const dayDiff = (todayUTC.getTime() - lastStudiedDayUTC.getTime()) / (24 * 60 * 60 * 1000);
+      
+      if (dayDiff === 1) {
+        // Studied yesterday, increment streak
+        newStreak += 1;
+      } else if (dayDiff > 1) {
+        // Break in streak, reset to 1
+        newStreak = 1;
+      }
     }
 
-    // Reset daily count if it's a new day
-    const dailyCount = lastStudiedDay?.getTime() === today.getTime() 
+    // Reset daily count if it's a new day (using UTC comparison)
+    const dailyCount = lastStudiedDayUTC?.getTime() === todayUTC.getTime() 
       ? user.dailyStudyCount + 1 
       : 1;
 
-    // Reset weekly count if it's a new week
-    const weekStart = new Date(today);
-    weekStart.setDate(today.getDate() - today.getDay());
-    const lastWeekStart = lastStudiedDate ? new Date(lastStudiedDate.getFullYear(), lastStudiedDate.getMonth(), lastStudiedDate.getDate() - lastStudiedDate.getDay()) : null;
-    const weeklyCount = lastWeekStart?.getTime() === weekStart.getTime()
+    // Reset weekly count if it's a new week (using UTC)
+    const weekStartUTC = new Date(todayUTC);
+    weekStartUTC.setUTCDate(todayUTC.getUTCDate() - todayUTC.getUTCDay());
+    
+    const lastWeekStartUTC = lastStudiedDayUTC 
+      ? new Date(Date.UTC(
+          lastStudiedDayUTC.getUTCFullYear(), 
+          lastStudiedDayUTC.getUTCMonth(), 
+          lastStudiedDayUTC.getUTCDate() - lastStudiedDayUTC.getUTCDay()))
+      : null;
+    
+    const weeklyCount = lastWeekStartUTC?.getTime() === weekStartUTC.getTime()
       ? user.weeklyStudyCount + 1
       : 1;
 

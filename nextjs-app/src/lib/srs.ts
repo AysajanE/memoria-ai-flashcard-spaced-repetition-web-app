@@ -33,7 +33,7 @@ interface SrsData {
  * 
  * Learning phase intervals (when currentInterval = 0):
  * - Again: 0 (immediate review)
- * - Hard: 0 (immediate review)
+ * - Hard: 0 (immediate review) - Changed to 1 day to prevent too frequent reviews
  * - Good: 1 (next day)
  * - Easy: 3 (3 days)
  * 
@@ -48,22 +48,30 @@ export function calculateSrsData(
   rating: StudyRating
 ): SrsData {
   const currentInterval = currentCard.srsInterval;
-  const currentEaseFactor = currentCard.srsEaseFactor;
+  const currentEaseFactor = typeof currentCard.srsEaseFactor === 'string' 
+    ? parseFloat(currentCard.srsEaseFactor) 
+    : currentCard.srsEaseFactor;
+  
+  // Use UTC timestamp for consistent date calculations
   const now = new Date();
 
   // Handle learning phase (interval = 0)
   if (currentInterval === 0) {
     const learningIntervals = {
       Again: 0,
-      Hard: 0,
+      Hard: 1, // Changed from 0 to 1 to prevent too frequent reviews
       Good: 1,
       Easy: 3
     };
 
+    // Calculate due date with UTC to avoid timezone issues
+    const dueDate = new Date();
+    dueDate.setUTCDate(dueDate.getUTCDate() + learningIntervals[rating]);
+
     return {
       newInterval: learningIntervals[rating],
       newEaseFactor: currentEaseFactor,
-      newDueDate: new Date(now.getTime() + learningIntervals[rating] * 24 * 60 * 60 * 1000)
+      newDueDate: dueDate
     };
   }
 
@@ -87,22 +95,26 @@ export function calculateSrsData(
       newInterval = 0; // Reset to learning phase
       break;
     case 'Hard':
-      newInterval = Math.round(currentInterval * 1.2);
+      // For Hard ratings, increase interval by 20% but ensure it's at least 1 day
+      newInterval = Math.max(1, Math.round(currentInterval * 1.2));
       break;
     case 'Good':
-      newInterval = Math.round(currentInterval * newEaseFactor);
+      // For Good ratings, increase by the ease factor
+      newInterval = Math.max(1, Math.round(currentInterval * newEaseFactor));
       break;
     case 'Easy':
-      newInterval = Math.round(currentInterval * newEaseFactor * 1.3);
+      // For Easy ratings, increase by ease factor with additional 30% boost
+      newInterval = Math.max(1, Math.round(currentInterval * newEaseFactor * 1.3));
       break;
   }
 
-  // Calculate new due date
-  const newDueDate = new Date(now.getTime() + newInterval * 24 * 60 * 60 * 1000);
+  // Calculate new due date using UTC to avoid timezone issues
+  const dueDate = new Date();
+  dueDate.setUTCDate(dueDate.getUTCDate() + newInterval);
 
   return {
     newInterval,
     newEaseFactor,
-    newDueDate
+    newDueDate: dueDate
   };
 } 
