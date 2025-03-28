@@ -50,8 +50,12 @@ python -m app.main
 The application uses several related tables:
 - Users: Store user accounts and study statistics
 - Decks: Organize flashcards into topic-based collections
-- Flashcards: Store the actual cards with SRS metadata
+- Flashcards: Store the actual cards with SRS metadata (interval, ease factor, due date)
 - Processing Jobs: Track AI processing operations
+
+The canonical schema is defined in `/nextjs-app/src/db/schema` and is accessible via:
+- Import from `@/db/schema`
+- Direct import from `/nextjs-app/src/db/schema`
 
 ## Development
 
