@@ -189,11 +189,11 @@ export async function reviewCardsAction(
       // Insert flashcards
       await tx.insert(flashcards).values(preparedFlashcards);
 
-      // Update job status to archived
+      // Update job status to completed
       await tx
         .update(processingJobs)
         .set({
-          status: "archived",
+          status: "completed",
           updatedAt: new Date(),
         })
         .where(eq(processingJobs.id, validatedData.jobId));
