@@ -30,6 +30,7 @@ export const processingJobs = pgTable(
     inputPayload: jsonb("input_payload").notNull(),
     resultPayload: jsonb("result_payload"),
     errorMessage: text("error_message"),
+    errorDetail: jsonb("error_detail"), // Detailed error information for better client handling
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),

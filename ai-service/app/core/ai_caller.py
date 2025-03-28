@@ -20,15 +20,69 @@ logger = logging.getLogger(__name__)
 
 class AIError(Exception):
     """Base exception for AI-related errors."""
-    pass
+    category = "unknown_error"
+    retryable = False
+    code = None
+    context = None
+    suggested_action = None
+    
+    def __init__(self, message, code=None, context=None, suggested_action=None):
+        super().__init__(message)
+        if code:
+            self.code = code
+        if context:
+            self.context = context
+        if suggested_action:
+            self.suggested_action = suggested_action
 
 class TokenLimitError(AIError):
     """Raised when input exceeds model's token limit."""
-    pass
+    category = "token_limit"
+    retryable = False
+    code = "TOKEN_EXCEEDED"
+    suggested_action = "Reduce the input text length or split it into smaller chunks."
+
+class AuthError(AIError):
+    """Raised for authentication-related errors."""
+    category = "auth_error"
+    retryable = False
+    code = "AUTH_FAILED"
+    suggested_action = "Check AI service authentication credentials."
+
+class RateLimitError(AIError):
+    """Raised when AI service rate limits are hit."""
+    category = "rate_limit"
+    retryable = True
+    code = "RATE_LIMIT_EXCEEDED"
+    suggested_action = "Try again later or reduce the frequency of requests."
+
+class NetworkError(AIError):
+    """Raised for network/connectivity issues."""
+    category = "network_error"
+    retryable = True
+    code = "NETWORK_FAILURE"
+    suggested_action = "Check network connectivity and try again."
+
+class AIModelError(AIError):
+    """Raised for AI model-specific errors."""
+    category = "ai_model_error"
+    retryable = False
+    code = "MODEL_ERROR"
+    suggested_action = "Try with a different model or adjust generation parameters."
+
+class ParseError(AIError):
+    """Raised for errors parsing AI responses."""
+    category = "parse_error"
+    retryable = False
+    code = "INVALID_RESPONSE"
+    suggested_action = "Contact support if the issue persists."
 
 class AIServiceError(AIError):
     """Raised for general AI service errors."""
-    pass
+    category = "internal_error"
+    retryable = False
+    code = "SERVICE_ERROR"
+    suggested_action = "Try again or contact support if the issue persists."
 
 # Initialize OpenAI client
 try:
@@ -89,41 +143,85 @@ async def generate_cards_with_ai(
                 return response.choices[0].message.content
                 
             except BadRequestError as e:
-                if "maximum context length" in str(e).lower():
-                    raise TokenLimitError(f"Input exceeds model's token limit: {str(e)}")
-                raise AIServiceError(f"Invalid request to AI service: {str(e)}")
+                error_msg = str(e).lower()
+                context = {"original_error": str(e)}
+                
+                if "maximum context length" in error_msg:
+                    raise TokenLimitError(
+                        f"Input exceeds model's token limit: {str(e)}",
+                        context=context
+                    )
+                elif "content filter" in error_msg:
+                    raise AIModelError(
+                        "Content was flagged by AI provider's content filter",
+                        code="CONTENT_FILTERED",
+                        context=context,
+                        suggested_action="Modify your content to comply with AI provider policies"
+                    )
+                else:
+                    raise AIModelError(
+                        f"Invalid request to AI service: {str(e)}",
+                        code="INVALID_REQUEST",
+                        context=context
+                    )
                 
             except AuthenticationError as e:
                 logger.error(f"Authentication error with OpenAI API: {str(e)}")
-                raise AIServiceError("Failed to authenticate with AI service")
+                raise AuthError(
+                    "Failed to authenticate with AI service",
+                    context={"original_error": str(e)}
+                )
                 
             except RateLimitError as e:
                 if attempt < max_retries - 1:
                     logger.warning(f"Rate limit hit, retrying in {retry_delay}s...")
                     await asyncio.sleep(retry_delay)
                     continue
-                raise AIServiceError(f"Rate limit exceeded after {max_retries} attempts")
+                
+                raise RateLimitError(
+                    f"Rate limit exceeded after {max_retries} attempts",
+                    context={"original_error": str(e), "attempts": max_retries}
+                )
                 
             except APITimeoutError as e:
                 if attempt < max_retries - 1:
                     logger.warning(f"API timeout, retrying in {retry_delay}s...")
                     await asyncio.sleep(retry_delay)
                     continue
-                raise AIServiceError(f"API timeout after {max_retries} attempts")
+                
+                raise NetworkError(
+                    f"API timeout after {max_retries} attempts",
+                    code="TIMEOUT",
+                    context={"original_error": str(e), "attempts": max_retries}
+                )
                 
             except APIConnectionError as e:
                 if attempt < max_retries - 1:
                     logger.warning(f"API connection error, retrying in {retry_delay}s...")
                     await asyncio.sleep(retry_delay)
                     continue
-                raise AIServiceError(f"API connection error after {max_retries} attempts")
+                
+                raise NetworkError(
+                    f"API connection error after {max_retries} attempts",
+                    context={"original_error": str(e), "attempts": max_retries}
+                )
                 
             except APIError as e:
                 logger.error(f"Unexpected OpenAI API error: {str(e)}")
-                raise AIServiceError(f"Unexpected AI service error: {str(e)}")
+                raise AIServiceError(
+                    f"Unexpected AI service error: {str(e)}",
+                    context={"original_error": str(e)}
+                )
                 
     except Exception as e:
-        if not isinstance(e, (TokenLimitError, AIServiceError)):
-            logger.error(f"Unexpected error in generate_cards_with_ai: {str(e)}")
-            raise AIServiceError(f"Unexpected error: {str(e)}")
-        raise 
+        if isinstance(e, AIError):
+            # Already one of our classified errors, just re-raise
+            raise
+            
+        # Unclassified error, wrap it in a generic AIServiceError
+        logger.error(f"Unexpected error in generate_cards_with_ai: {str(e)}")
+        raise AIServiceError(
+            f"Unexpected error: {str(e)}",
+            code="UNHANDLED_ERROR",
+            context={"original_error": str(e), "error_type": type(e).__name__}
+        ) 

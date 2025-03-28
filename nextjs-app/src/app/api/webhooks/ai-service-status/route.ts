@@ -4,12 +4,36 @@ import { processingJobs } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 
+// Define error detail schema for better error handling
+const ErrorCategory = z.enum([
+  "invalid_input",
+  "token_limit",
+  "auth_error",
+  "rate_limit",
+  "ai_model_error",
+  "parse_error",
+  "network_error",
+  "webhook_error",
+  "internal_error",
+  "unknown_error"
+]);
+
+const ErrorDetailSchema = z.object({
+  message: z.string(),
+  category: ErrorCategory,
+  code: z.string().nullable().optional(),
+  context: z.record(z.any()).nullable().optional(),
+  retryable: z.boolean().default(false),
+  suggestedAction: z.string().nullable().optional()
+});
+
 // Define the expected payload schema
 const StatusUpdateSchema = z.object({
   jobId: z.string().uuid(),
   status: z.enum(["completed", "failed"]),
   resultPayload: z.any().optional(),
-  errorMessage: z.string().optional(),
+  errorDetail: ErrorDetailSchema.optional(),
+  errorMessage: z.string().optional(), // Kept for backward compatibility
 });
 
 export async function POST(request: Request) {
@@ -33,7 +57,10 @@ export async function POST(request: Request) {
       .set({
         status: validatedPayload.status,
         resultPayload: validatedPayload.resultPayload,
-        errorMessage: validatedPayload.errorMessage,
+        // For backward compatibility, prioritize errorDetail but fall back to errorMessage
+        errorMessage: validatedPayload.errorDetail?.message || validatedPayload.errorMessage,
+        // Store the full error detail as a JSON object
+        errorDetail: validatedPayload.errorDetail ? JSON.stringify(validatedPayload.errorDetail) : null,
         completedAt: new Date(),
       })
       .where(eq(processingJobs.id, validatedPayload.jobId))

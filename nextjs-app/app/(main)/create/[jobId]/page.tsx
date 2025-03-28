@@ -85,9 +85,35 @@ export default function JobStatusPage({ params }: { params: { jobId: string } })
           ) : (
             <div className="space-y-4">
               <div className="bg-destructive/10 text-destructive p-4 rounded-md">
-                <p className="font-medium">Error: {error || 'Unknown error'}</p>
+                <div className="space-y-3">
+                  <p className="font-medium text-lg">Error</p>
+                  <p>{error || 'Unknown error'}</p>
+                  
+                  {/* If we have detailed error information */}
+                  {result?.errorDetail && (
+                    <div className="mt-4 pt-4 border-t border-destructive/20 space-y-2">
+                      {result.errorDetail.category && (
+                        <p className="text-sm">
+                          <span className="font-semibold">Type:</span> {' '}
+                          {result.errorDetail.category.replace(/_/g, ' ')}
+                          {result.errorDetail.code && ` (${result.errorDetail.code})`}
+                        </p>
+                      )}
+                      
+                      {result.errorDetail.suggestedAction && (
+                        <div className="bg-card p-3 rounded border border-muted text-sm">
+                          <span className="font-semibold">Suggested action:</span>{' '}
+                          {result.errorDetail.suggestedAction}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
-              <Button onClick={() => router.push("/create")}>Try Again</Button>
+              <div className="flex gap-3">
+                <Button onClick={() => router.push("/create")}>Try Again</Button>
+                <Button variant="outline" onClick={() => window.history.back()}>Go Back</Button>
+              </div>
             </div>
           )}
         </div>

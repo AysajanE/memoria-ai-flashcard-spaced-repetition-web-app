@@ -46,6 +46,7 @@ python -m app.main
 - **AI Processing**: Python FastAPI service using OpenAI/Claude APIs
   - Synchronized type definitions between frontend and backend
   - Configurable card generation (type, count, model)
+  - Comprehensive error handling with categorization and suggestions
 
 ### Database Schema
 

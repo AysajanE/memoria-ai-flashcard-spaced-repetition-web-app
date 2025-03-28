@@ -16,7 +16,20 @@ MAX_OUTPUT_TOKENS = settings.MAX_OUTPUT_TOKENS
 
 class WebhookError(Exception):
     """Custom exception for webhook-related errors"""
-    pass
+    category = "webhook_error"
+    retryable = True
+    code = "WEBHOOK_DELIVERY_FAILED"
+    suggested_action = "Check webhook configuration and retry."
+    context = None
+    
+    def __init__(self, message, code=None, context=None, suggested_action=None):
+        super().__init__(message)
+        if code:
+            self.code = code
+        if context:
+            self.context = context
+        if suggested_action:
+            self.suggested_action = suggested_action
 
 def clean_json_string(json_str: str) -> str:
     """Clean and normalize JSON string before parsing"""
@@ -42,23 +55,77 @@ def parse_ai_response(response_text: str) -> Dict[str, Any]:
         
         # Validate basic structure
         if not isinstance(result, dict):
-            raise ValueError("Response must be a JSON object")
+            raise ParseError(
+                "Response must be a JSON object",
+                code="INVALID_RESPONSE_STRUCTURE",
+                context={"response_type": type(result).__name__},
+                suggested_action="Check AI model parameters or try a different model"
+            )
         
         if "cards" not in result:
-            raise ValueError("Response must contain 'cards' array")
+            raise ParseError(
+                "Response must contain 'cards' array",
+                code="MISSING_CARDS_FIELD",
+                context={"available_fields": list(result.keys())},
+                suggested_action="Check AI model parameters or try a different model"
+            )
         
         if not isinstance(result["cards"], list):
-            raise ValueError("'cards' must be an array")
+            raise ParseError(
+                "'cards' must be an array",
+                code="INVALID_CARDS_TYPE",
+                context={"cards_type": type(result["cards"]).__name__},
+                suggested_action="Check AI model parameters or try a different model"
+            )
+        
+        # Validate each card structure
+        for i, card in enumerate(result["cards"]):
+            if not isinstance(card, dict):
+                raise ParseError(
+                    f"Card at index {i} must be an object",
+                    code="INVALID_CARD_TYPE",
+                    context={"index": i, "card_type": type(card).__name__}
+                )
+                
+            if "front" not in card:
+                raise ParseError(
+                    f"Card at index {i} missing 'front' field",
+                    code="MISSING_FRONT_FIELD",
+                    context={"index": i, "card_fields": list(card.keys())}
+                )
+                
+            if "back" not in card:
+                raise ParseError(
+                    f"Card at index {i} missing 'back' field",
+                    code="MISSING_BACK_FIELD", 
+                    context={"index": i, "card_fields": list(card.keys())}
+                )
         
         return result
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse AI response: {e}")
         logger.error(f"Raw response: {response_text}")
-        raise ValueError(f"Invalid JSON response: {str(e)}")
+        # Truncate response for the error context to avoid overwhelming logs
+        truncated_response = response_text[:500] + "..." if len(response_text) > 500 else response_text
+        raise ParseError(
+            f"Invalid JSON response: {str(e)}",
+            code="JSON_DECODE_ERROR",
+            context={"error": str(e), "response_snippet": truncated_response},
+            suggested_action="Try adjusting the model parameters or try a different model"
+        )
+    except ParseError:
+        # Just re-raise if it's already a ParseError
+        raise
     except Exception as e:
         logger.error(f"Unexpected error parsing AI response: {e}")
         logger.error(f"Raw response: {response_text}")
-        raise
+        # Truncate response for the error context
+        truncated_response = response_text[:500] + "..." if len(response_text) > 500 else response_text
+        raise ParseError(
+            f"Error processing AI response: {str(e)}",
+            code="RESPONSE_PROCESSING_ERROR",
+            context={"error_type": type(e).__name__, "error": str(e), "response_snippet": truncated_response}
+        )
 
 def send_webhook_with_retry(
     payload: WebhookPayload,
@@ -69,30 +136,115 @@ def send_webhook_with_retry(
     """Send webhook with exponential backoff retry"""
     delay = initial_delay
     last_error = None
+    last_status = None
+    last_response_text = None
     
     for attempt in range(max_retries):
         try:
             response = requests.post(
                 settings.NEXTJS_APP_STATUS_WEBHOOK_URL,
                 json=payload.model_dump(),
-                headers={"x-internal-api-key": settings.INTERNAL_API_KEY},
+                headers={
+                    "x-internal-api-key": settings.INTERNAL_API_KEY,
+                    "content-type": "application/json",
+                    "user-agent": "ai-service-webhook/1.0"
+                },
                 timeout=10
             )
+            last_status = response.status_code
+            
+            try:
+                last_response_text = response.text[:200]  # Truncate long responses
+            except:
+                last_response_text = "(could not extract response text)"
+                
+            # Check if status code indicates success
             response.raise_for_status()
             logger.info(f"Webhook sent successfully (attempt {attempt + 1})")
             return
+            
+        except requests.exceptions.HTTPError as e:
+            last_error = e
+            logger.warning(f"Webhook HTTP error (attempt {attempt + 1}): {e}")
+            
+            # Special handling for different status codes
+            if response.status_code == 401 or response.status_code == 403:
+                # Auth errors are not retryable
+                code = "WEBHOOK_AUTH_ERROR"
+                suggested_action = "Check webhook authentication credentials"
+                retryable = False
+                break
+                
+            elif response.status_code == 404:
+                code = "WEBHOOK_ENDPOINT_NOT_FOUND"
+                suggested_action = "Verify webhook URL configuration"
+                retryable = False
+                break
+                
+            elif response.status_code == 429:
+                code = "WEBHOOK_RATE_LIMITED"
+                retryable = True
+            
+            elif response.status_code >= 500:
+                code = "WEBHOOK_SERVER_ERROR"
+                retryable = True
+            
+            else:
+                code = "WEBHOOK_HTTP_ERROR"
+                retryable = True
+                
+        except requests.exceptions.Timeout as e:
+            last_error = e
+            logger.warning(f"Webhook timeout (attempt {attempt + 1}): {e}")
+            code = "WEBHOOK_TIMEOUT"
+            retryable = True
+            
+        except requests.exceptions.ConnectionError as e:
+            last_error = e
+            logger.warning(f"Webhook connection error (attempt {attempt + 1}): {e}")
+            code = "WEBHOOK_CONNECTION_ERROR"
+            retryable = True
+            
         except requests.exceptions.RequestException as e:
             last_error = e
-            logger.warning(f"Webhook attempt {attempt + 1} failed: {e}")
+            logger.warning(f"Webhook error (attempt {attempt + 1}): {e}")
+            code = "WEBHOOK_REQUEST_ERROR"
+            retryable = True
             
-            if attempt < max_retries - 1:
-                time.sleep(delay)
-                delay = min(delay * 2, max_delay)  # Exponential backoff
+        # Attempt retry if we haven't reached max retries
+        if attempt < max_retries - 1:
+            time.sleep(delay)
+            delay = min(delay * 2, max_delay)  # Exponential backoff
+        
+    # If we get here, all retries failed or we hit a non-retryable error
+    error_context = {
+        "attempts": attempt + 1,
+        "last_status": last_status,
+        "last_response": last_response_text,
+        "original_error": str(last_error) if last_error else None
+    }
     
-    # If we get here, all retries failed
-    error_msg = f"Failed to send webhook after {max_retries} attempts. Last error: {last_error}"
+    error_msg = f"Failed to send webhook after {attempt + 1} attempts. Last error: {last_error}"
     logger.error(error_msg)
-    raise WebhookError(error_msg)
+    
+    # Default values if not set in the exception handlers
+    if 'code' not in locals():
+        code = "WEBHOOK_DELIVERY_FAILED"
+    if 'suggested_action' not in locals():
+        suggested_action = "Check webhook configuration and network connectivity"
+    if 'retryable' not in locals():
+        retryable = True
+    
+    # Create a WebhookError with detailed information
+    webhook_error = WebhookError(
+        error_msg,
+        code=code,
+        context=error_context,
+        suggested_action=suggested_action
+    )
+    webhook_error.retryable = retryable
+    
+    raise webhook_error
 
 async def process_card_generation(
     job_id: str,
@@ -104,7 +256,7 @@ async def process_card_generation(
 ) -> None:
     """Process card generation with more control over card type and count"""
     start_time = start_time or time.time()
-    """Process card generation and send webhook with retries"""
+    
     try:
         # Check input token limit
         input_tokens = count_tokens(input_text, model)
@@ -115,7 +267,14 @@ async def process_card_generation(
                 "Please reduce the input text length or split it into smaller chunks."
             )
             logger.warning(error_msg)
-            raise TokenLimitError(error_msg)
+            raise TokenLimitError(
+                error_msg,
+                context={
+                    "input_tokens": input_tokens,
+                    "max_tokens": MAX_INPUT_TOKENS,
+                    "model": model
+                }
+            )
 
         # Generate cards using AI with all parameters
         result = await generate_cards_with_ai(
@@ -138,7 +297,16 @@ async def process_card_generation(
                 "Please try with a shorter input text."
             )
             logger.warning(error_msg)
-            raise TokenLimitError(error_msg)
+            raise TokenLimitError(
+                error_msg,
+                code="OUTPUT_TOKEN_LIMIT_EXCEEDED",
+                context={
+                    "output_tokens": output_tokens,
+                    "max_tokens": MAX_OUTPUT_TOKENS,
+                    "model": model,
+                    "card_count": len(parsed_result["cards"])
+                }
+            )
         
         # Create result payload
         result_payload = GenerateCardsResult(
@@ -157,27 +325,92 @@ async def process_card_generation(
         
         send_webhook_with_retry(webhook_payload)
         
-    except TokenLimitError as e:
-        logger.error(f"Token limit exceeded: {e}")
+    except (TokenLimitError, ParseError, AuthError, RateLimitError, 
+            NetworkError, AIModelError, AIServiceError) as e:
+        # Handle all our custom error types
+        
+        # Prepare detailed error information
+        error_detail = ErrorDetail(
+            message=str(e),
+            category=ErrorCategory(getattr(e, "category", "unknown_error")),
+            code=getattr(e, "code", None),
+            context=getattr(e, "context", None),
+            retryable=getattr(e, "retryable", False),
+            suggestedAction=getattr(e, "suggested_action", None)
+        )
+        
+        # Log the error with details
+        logger.error(
+            f"AI processing error: {error_detail.category}:{error_detail.code} - {error_detail.message}"
+        )
+        
+        # Create webhook payload with detailed error information
         webhook_payload = WebhookPayload(
             jobId=job_id,
             status="failed",
+            errorDetail=error_detail,
+            # Also include simple error message for backward compatibility
             errorMessage=str(e)
         )
-        send_webhook_with_retry(webhook_payload)
-    except AIServiceError as e:
-        logger.error(f"AI service error: {e}")
-        webhook_payload = WebhookPayload(
-            jobId=job_id,
-            status="failed",
-            errorMessage=f"AI service error: {str(e)}"
-        )
-        send_webhook_with_retry(webhook_payload)
+        
+        # Send the error details to the frontend via webhook
+        try:
+            send_webhook_with_retry(webhook_payload)
+        except WebhookError as webhook_err:
+            # Log webhook delivery failure, but don't re-raise as we want to preserve the original error
+            logger.error(f"Failed to deliver error details via webhook: {webhook_err}")
+            
+    except WebhookError as e:
+        # Special handling for webhook errors when delivering successful results
+        logger.error(f"Webhook delivery error: {e}")
+        
+        # Attempt to send a simplified error payload as a last resort
+        try:
+            simple_payload = WebhookPayload(
+                jobId=job_id,
+                status="failed",
+                errorDetail=ErrorDetail(
+                    message=f"Successfully generated cards but failed to deliver results: {str(e)}",
+                    category=ErrorCategory.WEBHOOK_ERROR,
+                    code=getattr(e, "code", "WEBHOOK_ERROR"),
+                    retryable=getattr(e, "retryable", True),
+                    suggestedAction="Please try again or contact support."
+                ),
+                errorMessage=f"Webhook delivery error: {str(e)}"
+            )
+            # Use a direct POST without our retry mechanism which already failed
+            requests.post(
+                settings.NEXTJS_APP_STATUS_WEBHOOK_URL,
+                json=simple_payload.model_dump(),
+                headers={"x-internal-api-key": settings.INTERNAL_API_KEY},
+                timeout=5
+            )
+        except Exception as fallback_err:
+            logger.error(f"Failed to send fallback error notification: {fallback_err}")
+            
     except Exception as e:
-        logger.error(f"Error processing card generation: {e}")
+        # Catch-all for unexpected errors
+        logger.error(f"Unexpected error processing card generation: {e}", exc_info=True)
+        
+        error_detail = ErrorDetail(
+            message=f"An unexpected error occurred: {str(e)}",
+            category=ErrorCategory.INTERNAL_ERROR,
+            code="UNHANDLED_ERROR",
+            context={"error_type": type(e).__name__},
+            retryable=False,
+            suggestedAction="Please try again or contact support if the issue persists."
+        )
+        
+        # Create webhook payload with error information
         webhook_payload = WebhookPayload(
             jobId=job_id,
             status="failed",
+            errorDetail=error_detail,
             errorMessage=f"An unexpected error occurred: {str(e)}"
         )
-        send_webhook_with_retry(webhook_payload) 
+        
+        # Try to send the error details
+        try:
+            send_webhook_with_retry(webhook_payload)
+        except Exception as webhook_err:
+            logger.error(f"Failed to deliver error notification: {webhook_err}") 
