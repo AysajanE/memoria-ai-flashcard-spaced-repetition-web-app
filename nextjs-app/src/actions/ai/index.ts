@@ -70,7 +70,7 @@ export async function submitTextForCardsAction(
         status: "failed",
         errorMessage: "Failed to trigger AI processing",
       })
-      .where({ id: jobId });
+      .where(eq(processingJobs.id, jobId));
 
     return {
       isSuccess: false,
