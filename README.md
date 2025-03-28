@@ -12,7 +12,7 @@ The project consists of two main parts:
 ### Key Features
 
 - **AI-Powered Flashcard Generation**: Convert your notes and texts into well-structured flashcards
-- **Spaced Repetition**: Study cards using an optimized algorithm based on the Anki SM-2 variant
+- **Spaced Repetition**: Study cards using an optimized algorithm based on the Anki SM-2 variant (implementation in `/nextjs-app/src/lib/srs.ts`)
 - **Progress Tracking**: Track your learning progress with detailed statistics
 - **Educational Content**: Access articles about spaced repetition and effective learning techniques
 
