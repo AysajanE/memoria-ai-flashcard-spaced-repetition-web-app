@@ -1,4 +1,4 @@
-// This file will aggregate and export all schema definitions
+// This file aggregates and exports all schema definitions
 // export * from './users';
 // export * from './processingJobs';
 // ... etc.
@@ -7,4 +7,6 @@
 export const schema = {}; 
 
 export * from './users';
-export * from './processingJobs'; 
+export * from './processingJobs';
+export * from './decks';
+export * from './flashcards'; 
