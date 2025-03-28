@@ -229,10 +229,19 @@ export async function reviewCardsAction(
     console.error("Error in reviewCardsAction:", error);
 
     if (error instanceof z.ZodError) {
+      // Create a clean object without undefined values
+      const cleanFieldErrors: Record<string, string[]> = {};
+      
+      Object.entries(error.formErrors.fieldErrors).forEach(([key, value]) => {
+        if (value !== undefined) {
+          cleanFieldErrors[key] = value;
+        }
+      });
+      
       return {
         isSuccess: false,
         message: "Invalid input data",
-        error: error.formErrors.fieldErrors,
+        error: cleanFieldErrors,
       };
     }
 
