@@ -37,8 +37,18 @@ export default async function RootLayout({
             disableTransitionOnChange
           >
             <div className="relative flex min-h-screen flex-col">
+              <a href="#main-content" className="skip-link">
+                Skip to main content
+              </a>
               <SiteHeader />
-              <main className="flex-1">{children}</main>
+              <main id="main-content" className="flex-1 pb-16" tabIndex={-1}>
+                {children}
+              </main>
+              <footer className="py-6 border-t border-border/50">
+                <div className="container text-center text-sm text-muted-foreground">
+                  <p>Memoria - AI-powered flashcard learning</p>
+                </div>
+              </footer>
             </div>
             <Toaster richColors closeButton position="top-center" />
           </ThemeProvider>

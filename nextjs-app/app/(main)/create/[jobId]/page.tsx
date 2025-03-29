@@ -70,15 +70,26 @@ export default function JobStatusPage({ params }: { params: { jobId: string } })
           ) : status === 'completed' ? (
             <div className="space-y-4">
               <h3 className="font-medium">Generated Flashcards:</h3>
-              <div className="bg-card p-4 rounded-md">
-                {result ? (
-                  <pre className="whitespace-pre-wrap">{JSON.stringify(result, null, 2)}</pre>
+              <div className="space-y-4 mt-4">
+                {result?.flashcards ? (
+                  result.flashcards.map((card: any, index: number) => (
+                    <div key={index} className="bg-card p-5 rounded-lg border border-border shadow-sm hover:shadow-md transition-all">
+                      <div className="mb-4">
+                        <h4 className="text-sm font-medium text-muted-foreground mb-2">QUESTION</h4>
+                        <p className="text-lg">{card.front}</p>
+                      </div>
+                      <div className="pt-4 border-t border-border/50">
+                        <h4 className="text-sm font-medium text-muted-foreground mb-2">ANSWER</h4>
+                        <p className="text-lg">{card.back}</p>
+                      </div>
+                    </div>
+                  ))
                 ) : (
-                  <p>No results available</p>
+                  <p>No flashcards available</p>
                 )}
               </div>
-              <div className="flex gap-4 pt-4">
-                <Button onClick={() => router.push("/dashboard")}>Save & Return to Dashboard</Button>
+              <div className="flex gap-4 pt-6">
+                <Button onClick={() => router.push("/decks")}>Save & View Decks</Button>
                 <Button variant="outline" onClick={() => router.push("/create")}>Create New Cards</Button>
               </div>
             </div>

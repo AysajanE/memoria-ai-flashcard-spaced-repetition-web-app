@@ -14,12 +14,12 @@ export function PageHeader({
   children,
 }: PageHeaderProps) {
   return (
-    <div className={cn("space-y-2", className)}>
-      <h1 className="text-3xl font-bold tracking-tight">{heading}</h1>
+    <div className={cn("mb-8", className)}>
+      <h1 className="text-3xl font-bold tracking-tight mb-3">{heading}</h1>
       {description && (
-        <p className="text-muted-foreground text-lg">{description}</p>
+        <p className="text-muted-foreground text-lg max-w-3xl">{description}</p>
       )}
-      {children}
+      {children && <div className="mt-4">{children}</div>}
     </div>
   );
 } 

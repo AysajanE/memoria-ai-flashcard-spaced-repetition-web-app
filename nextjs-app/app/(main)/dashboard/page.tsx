@@ -107,49 +107,45 @@ function RecentActivity() {
 
 function QuickActions() {
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
       <Link 
         href="/create" 
-        className="flex flex-col items-center justify-center p-6 bg-gradient-to-br from-indigo-50 to-purple-50 dark:from-indigo-900/30 dark:to-purple-900/30 rounded-xl text-center border border-indigo-100 dark:border-indigo-800 hover:shadow-md transition-all group"
+        className="flex flex-col items-center justify-center p-6 bg-white dark:bg-gray-900 rounded-xl text-center border border-gray-100 dark:border-gray-800 hover:shadow-sm transition-all group"
       >
-        <div className="w-12 h-12 rounded-full bg-white dark:bg-gray-800 flex items-center justify-center shadow-sm mb-4 group-hover:scale-110 transition-transform">
-          <Plus className="text-indigo-600 dark:text-indigo-400" />
+        <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center mb-4">
+          <Plus className="text-primary h-5 w-5" />
         </div>
-        <h3 className="font-semibold mb-1">Create Cards</h3>
-        <p className="text-sm text-gray-600 dark:text-gray-400">Generate new flashcards from text</p>
+        <h3 className="font-medium">Create Cards</h3>
       </Link>
       
       <Link 
         href="/decks" 
-        className="flex flex-col items-center justify-center p-6 bg-gradient-to-br from-purple-50 to-pink-50 dark:from-purple-900/30 dark:to-pink-900/30 rounded-xl text-center border border-purple-100 dark:border-purple-800 hover:shadow-md transition-all group"
+        className="flex flex-col items-center justify-center p-6 bg-white dark:bg-gray-900 rounded-xl text-center border border-gray-100 dark:border-gray-800 hover:shadow-sm transition-all group"
       >
-        <div className="w-12 h-12 rounded-full bg-white dark:bg-gray-800 flex items-center justify-center shadow-sm mb-4 group-hover:scale-110 transition-transform">
-          <BookOpen className="text-purple-600 dark:text-purple-400" />
+        <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center mb-4">
+          <BookOpen className="text-primary h-5 w-5" />
         </div>
-        <h3 className="font-semibold mb-1">My Decks</h3>
-        <p className="text-sm text-gray-600 dark:text-gray-400">Browse all your flashcard decks</p>
+        <h3 className="font-medium">My Decks</h3>
       </Link>
       
       <Link 
         href="/study" 
-        className="flex flex-col items-center justify-center p-6 bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/30 dark:to-indigo-900/30 rounded-xl text-center border border-blue-100 dark:border-blue-800 hover:shadow-md transition-all group"
+        className="flex flex-col items-center justify-center p-6 bg-white dark:bg-gray-900 rounded-xl text-center border border-gray-100 dark:border-gray-800 hover:shadow-sm transition-all group"
       >
-        <div className="w-12 h-12 rounded-full bg-white dark:bg-gray-800 flex items-center justify-center shadow-sm mb-4 group-hover:scale-110 transition-transform">
-          <Brain className="text-blue-600 dark:text-blue-400" />
+        <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center mb-4">
+          <Brain className="text-primary h-5 w-5" />
         </div>
-        <h3 className="font-semibold mb-1">Study Now</h3>
-        <p className="text-sm text-gray-600 dark:text-gray-400">Continue where you left off</p>
+        <h3 className="font-medium">Study</h3>
       </Link>
       
       <Link 
         href="/articles" 
-        className="flex flex-col items-center justify-center p-6 bg-gradient-to-br from-pink-50 to-rose-50 dark:from-pink-900/30 dark:to-rose-900/30 rounded-xl text-center border border-pink-100 dark:border-pink-800 hover:shadow-md transition-all group"
+        className="flex flex-col items-center justify-center p-6 bg-white dark:bg-gray-900 rounded-xl text-center border border-gray-100 dark:border-gray-800 hover:shadow-sm transition-all group"
       >
-        <div className="w-12 h-12 rounded-full bg-white dark:bg-gray-800 flex items-center justify-center shadow-sm mb-4 group-hover:scale-110 transition-transform">
-          <ArrowUpRight className="text-pink-600 dark:text-pink-400" />
+        <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center mb-4">
+          <ArrowUpRight className="text-primary h-5 w-5" />
         </div>
-        <h3 className="font-semibold mb-1">Learn More</h3>
-        <p className="text-sm text-gray-600 dark:text-gray-400">Read articles about spaced repetition</p>
+        <h3 className="font-medium">Articles</h3>
       </Link>
     </div>
   );
@@ -167,31 +163,30 @@ export default async function DashboardPage() {
   };
 
   return (
-    <div className="container space-y-8 py-8">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <div className="container max-w-6xl mx-auto space-y-10 py-10">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-6">
         <div>
           <h1 className="text-3xl font-bold">Welcome back!</h1>
-          <p className="text-gray-600 dark:text-gray-400 mt-1">
-            Track your progress and continue your learning journey
+          <p className="text-muted-foreground mt-2">
+            Continue your learning journey
           </p>
         </div>
         <Link
           href="/create"
-          className="px-4 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white font-medium rounded-lg transition-all shadow-md hover:shadow-lg inline-flex items-center self-start sm:self-center"
+          className="px-5 py-2.5 bg-primary hover:bg-primary/90 text-white font-medium rounded-lg transition-all shadow-sm hover:shadow inline-flex items-center self-start sm:self-center"
         >
           <Plus className="mr-2 h-5 w-5" />
-          Generate Cards
+          Create Cards
         </Link>
       </div>
 
-      {/* Stats Overview */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* Stats Overview - Simplified */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
         <StatsCard 
           title="Cards Reviewed" 
           value={stats.cardsReviewed} 
           color="indigo"
           icon={<BookOpen size={18} />}
-          trend={{ positive: true, value: 12 }}
         />
         <StatsCard 
           title="Current Streak" 
@@ -213,19 +208,19 @@ export default async function DashboardPage() {
         />
       </div>
       
-      {/* Quick Actions */}
+      {/* Quick Actions - Simplified */}
       <section>
-        <h2 className="text-xl font-bold mb-4">Quick Actions</h2>
+        <h2 className="text-xl font-semibold mb-5">Quick Actions</h2>
         <QuickActions />
       </section>
 
-      {/* Recent Activity */}
-      <section>
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-xl font-bold">Recent Activity</h2>
+      {/* Recent Activity - Simplified */}
+      <section className="pt-4">
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="text-xl font-semibold">Recent Activity</h2>
           <Link 
             href="/progress" 
-            className="text-sm font-medium text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 flex items-center"
+            className="text-sm font-medium text-primary hover:text-primary/80 flex items-center"
           >
             View all
             <ArrowUpRight className="ml-1 h-4 w-4" />
