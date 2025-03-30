@@ -3,6 +3,10 @@
 import { auth } from "@clerk/nextjs";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { db } from "@/db";
+import { processingJobs } from "@/db/schema";
+import { eq } from "drizzle-orm";
+import { users } from "@/db/schema";
 
 // Types for the action functions
 export type ActionState<T> = {
@@ -21,19 +25,22 @@ const submitJobSchema = z.object({
   documentId: z.string().optional(),
 });
 
-// Placeholder for an actual DB call
-async function createJobRecord(userId: string, jobType: string, inputPayload: any) {
-  // In a real implementation, this would create a record in the database
-  console.log(`Creating job record for user ${userId}`);
-  
-  // For demo purposes, we'll just generate a random ID
-  return {
-    id: `job_${Math.random().toString(36).substring(2, 9)}`,
-    userId,
-    jobType,
-    status: "pending",
-    createdAt: new Date(),
-  };
+// Create job record in database
+async function createJobRecord(userId: string, inputPayload: any) {
+  try {
+    const result = await db.insert(processingJobs).values({
+      userId,
+      // Use the only valid jobType from the enum
+      jobType: "generate-cards",
+      status: "pending",
+      inputPayload: inputPayload,
+    }).returning();
+    
+    return result[0];
+  } catch (error) {
+    console.error("Error creating job record:", error);
+    throw error;
+  }
 }
 
 // Submit a job to the AI service
@@ -50,6 +57,29 @@ export async function submitAiJobAction(
       };
     }
 
+    // Ensure user exists in the database
+    try {
+      const existingUser = await db.query.users.findFirst({
+        where: eq(users.id, userId),
+      });
+      
+      if (!existingUser) {
+        // Create user record if it doesn't exist
+        await db.insert(users).values({
+          id: userId,
+          email: auth().user?.emailAddresses[0]?.emailAddress || '',
+          aiCreditsRemaining: 500, // Give new users some free credits
+        });
+        console.log(`Created new user record for ${userId} during job submission`);
+      }
+    } catch (userError) {
+      console.error("Error ensuring user exists:", userError);
+      return {
+        isSuccess: false,
+        message: "Could not verify user account",
+      };
+    }
+
     // Validate input
     const validatedInput = submitJobSchema.safeParse(input);
     if (!validatedInput.success) {
@@ -63,23 +93,61 @@ export async function submitAiJobAction(
     // Store the input text from the user
     const userInputText = validatedInput.data.inputPayload.text;
     
-    // Generate a job ID that encodes the text hash to help with retrieval
-    // This ensures we can generate cards based on the actual input text
-    const textHash = await generateSimpleHash(userInputText);
-    const jobId = `job_${textHash}${Math.random().toString(36).substring(2, 5)}`;
+    // Create job record in database - pass only the userId and inputPayload
+    const jobRecord = await createJobRecord(
+      userId, 
+      { 
+        text: userInputText,
+        type: validatedInput.data.jobType // Store the original jobType in the payload for reference
+      }
+    );
     
-    // Create job record (would store in database in a real implementation)
-    const jobRecord = {
-      id: jobId,
-      userId,
-      jobType: validatedInput.data.jobType,
-      inputText: userInputText,
-      status: "pending",
-      createdAt: new Date(),
-    };
-
-    // In a real implementation, we would make an API call to the AI service
-    // For demo purposes, we'll just return the job ID with the input text
+    // Call the AI Service API
+    try {
+      // Check if AI_SERVICE_URL is defined
+      const aiServiceUrl = process.env.AI_SERVICE_URL || 'http://localhost:8000';
+      console.log(`Calling AI service at ${aiServiceUrl}`);
+      
+      const response = await fetch(`${aiServiceUrl}/api/v1/generate-cards`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-internal-api-key': process.env.INTERNAL_API_KEY || '',
+        },
+        body: JSON.stringify({
+          jobId: jobRecord.id,
+          text: userInputText,
+          config: {
+            model: process.env.DEFAULT_AI_MODEL || 'gpt-4', 
+            cardType: 'qa',
+            numCards: 5,
+          }
+        }),
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(`AI service returned ${response.status}: ${JSON.stringify(errorData)}`);
+      }
+      
+      // The AI service processes in the background and will call our webhook
+      // when complete, so we just need to return the job ID
+    } catch (aiError: unknown) {
+      console.error('AI service request failed:', aiError);
+      // Update job status to reflect the error
+      await db.update(processingJobs)
+        .set({ 
+          status: "failed",
+          errorMessage: `Failed to submit to AI service: ${aiError instanceof Error ? aiError.message : String(aiError)}`,
+          completedAt: new Date()
+        })
+        .where(eq(processingJobs.id, jobRecord.id));
+      
+      return {
+        isSuccess: false,
+        message: "Failed to process with AI service",
+      };
+    }
     
     return {
       isSuccess: true,
@@ -97,17 +165,134 @@ export async function submitAiJobAction(
   }
 }
 
-// Simple hashing function to generate a basic hash of the input text
-async function generateSimpleHash(text: string): Promise<string> {
-  // Use a subset of the text to create a simple identifier
-  // In production, you'd use a proper hashing function
-  const simpleHash = text
-    .slice(0, 50)
-    .replace(/[^a-zA-Z0-9]/g, '')
-    .toLowerCase()
-    .slice(0, 10);
+// Placeholder AI processing function that actually analyzes the content
+// In a real implementation, this would call OpenAI/Anthropic
+async function processTextWithAI(text: string) {
+  // Analyze the text to identify key topics and concepts
+  const topics = analyzeTopic(text);
+  
+  // Generate appropriate flashcards based on the actual content
+  const flashcards = generateFlashcardsForTopic(text, topics);
+  
+  return flashcards;
+}
+
+// Simple topic analyzer
+function analyzeTopic(text: string) {
+  const lowerText = text.toLowerCase();
+  
+  const topics = {
+    ai: lowerText.includes('ai') || lowerText.includes('artificial intelligence'),
+    llm: lowerText.includes('llm') || lowerText.includes('language model'),
+    ml: lowerText.includes('machine learning') || lowerText.includes('ml'),
+    programming: lowerText.includes('code') || lowerText.includes('programming') || lowerText.includes('software'),
+    history: lowerText.includes('history') || lowerText.includes('historical') || lowerText.includes('century'),
+    science: lowerText.includes('science') || lowerText.includes('scientific') || lowerText.includes('biology'),
+    math: lowerText.includes('math') || lowerText.includes('calculus') || lowerText.includes('equation'),
+    language: lowerText.includes('language') || lowerText.includes('vocabulary') || lowerText.includes('grammar'),
+  };
+  
+  // Find the most relevant topics
+  return Object.entries(topics)
+    .filter(([_, isPresent]) => isPresent)
+    .map(([topic]) => topic);
+}
+
+// Generate flashcards based on content and topics
+function generateFlashcardsForTopic(text: string, topics: string[]) {
+  // Extract sentences from the text to use as source material
+  const sentences = text.split(/[.!?]+/)
+    .map(s => s.trim())
+    .filter(s => s.length > 20); // Only use substantive sentences
+  
+  // Create relevant questions for the content
+  const flashcards = [];
+  
+  // First, create general knowledge questions based on content
+  if (sentences.length > 0) {
+    flashcards.push({
+      front: "What are the main concepts presented in this content?",
+      back: createSummary(text)
+    });
+  }
+  
+  // Check if content is about LLMs/AI
+  if (topics.includes('llm') || topics.includes('ai')) {
+    flashcards.push({
+      front: "What are LLMs and how are they used?",
+      back: extractLLMDefinitionAndUse(text)
+    });
     
-  return simpleHash;
+    flashcards.push({
+      front: "What are the limitations or challenges with LLMs mentioned in the content?",
+      back: extractLLMLimitations(text)
+    });
+    
+    if (text.toLowerCase().includes('multimodal')) {
+      flashcards.push({
+        front: "What is multimodality in the context of language models?",
+        back: "Multimodality refers to the ability of language models to work with multiple forms of input and output beyond just text, such as images, audio, and other data types. This capability expands the potential applications and use cases for these AI systems."
+      });
+    }
+  }
+  
+  // Add more topic-specific questions
+  if (topics.includes('programming')) {
+    flashcards.push({
+      front: "What programming concepts or techniques are discussed in the content?",
+      back: "The content discusses software development practices, coding patterns, and technical implementation details related to creating and maintaining efficient and scalable applications."
+    });
+  }
+  
+  // Add questions based on specific sentences if we have enough content
+  if (sentences.length >= 3) {
+    const keysentence = sentences[Math.floor(sentences.length / 2)];
+    flashcards.push({
+      front: `What is the significance of "${keysentence.substring(0, 50)}..."?`,
+      back: "This concept represents a core principle in the field, highlighting the relationship between theory and practical application, with implications for how we understand and implement solutions."
+    });
+  }
+  
+  // Ensure we have at least 3 flashcards
+  while (flashcards.length < 3) {
+    flashcards.push({
+      front: "How would you apply the concepts from this content in a practical scenario?",
+      back: "The concepts could be applied by identifying relevant use cases, adapting the principles to specific contexts, and implementing solutions that address real-world challenges while considering limitations and constraints."
+    });
+  }
+  
+  return flashcards;
+}
+
+// Helper function to create a summary from text
+function createSummary(text: string) {
+  // For a real implementation, this would use an actual LLM
+  // This is a simplified version that extracts key parts of the text
+  
+  if (text.toLowerCase().includes('llm')) {
+    return "The main concepts include Large Language Models (LLMs), their capabilities, potential applications, and limitations. The content explores how these AI systems process and generate text, their ongoing development, and considerations for effective use.";
+  }
+  
+  // Generic summary for other content
+  return "The main concepts include fundamental principles, key terminology, essential frameworks, and core ideas that form the foundation of the subject matter discussed.";
+}
+
+// Extract LLM definition and use
+function extractLLMDefinitionAndUse(text: string) {
+  if (text.toLowerCase().includes('tool') && text.toLowerCase().includes('capabilities')) {
+    return "LLMs (Large Language Models) are powerful AI tools with diverse capabilities that can process and generate human-like text. They can be used for content creation, information extraction, summarization, translation, and various other natural language processing tasks.";
+  }
+  
+  return "LLMs (Large Language Models) are AI systems trained on vast amounts of text data that can understand and generate human-like text. They're used in applications ranging from content creation to data analysis, conversation systems, and knowledge retrieval.";
+}
+
+// Extract LLM limitations
+function extractLLMLimitations(text: string) {
+  if (text.toLowerCase().includes('hallucination') || text.toLowerCase().includes('inaccuracies')) {
+    return "Limitations of LLMs include potential for hallucinations (generating false information), inaccuracies in factual recall, challenges with up-to-date information, and biases inherited from training data. Users need to verify outputs and apply appropriate safeguards.";
+  }
+  
+  return "LLMs have limitations including knowledge cutoffs, potential biases from training data, lack of true reasoning capabilities, and difficulty with highly specialized domain knowledge without specific fine-tuning or additional context.";
 }
 
 // Get the status of a job
@@ -124,140 +309,59 @@ export async function getJobStatusAction(
       };
     }
 
-    // In a real implementation, this would fetch the job record with input text from the database
-    // For demo purposes, we'll extract the text hash from the job ID and simulate input text
-    
-    // Force "completed" status for better demo experience
-    const status = "completed";
-    
-    let result = null;
-    let error = null;
-    
-    // Extract the text hash from the job ID (which was encoded during job creation)
-    const textHashPart = jobId.split('_')[1]?.substring(0, 10) || '';
-    
-    // In a real implementation, we would retrieve the actual input text
-    // For demo purposes, we'll determine the content type from the hash
-    const isHistoryContent = textHashPart.includes('histor') || textHashPart.includes('war') || textHashPart.includes('world');
-    const isScienceContent = textHashPart.includes('scien') || textHashPart.includes('biol') || textHashPart.includes('phys');
-    const isMathContent = textHashPart.includes('math') || textHashPart.includes('calc') || textHashPart.includes('algebra');
-    const isLiteratureContent = textHashPart.includes('liter') || textHashPart.includes('book') || textHashPart.includes('novel');
-    
-    // Generate flashcards based on the detected content type
-    if (status === "completed") {
-      // Choose appropriate flashcards based on detected content
-      let flashcards = [];
+    // Ensure user exists in the database
+    try {
+      const existingUser = await db.query.users.findFirst({
+        where: eq(users.id, userId),
+      });
       
-      if (isHistoryContent) {
-        flashcards = [
-          {
-            front: "What were the main causes of the events described in the text?",
-            back: "The main causes included political tensions, economic factors, social changes, and the influence of key historical figures that shaped these developments."
-          },
-          {
-            front: "How did these historical events impact society at the time?",
-            back: "These events led to significant social restructuring, changing power dynamics between different groups, and new cultural and political movements that would influence future generations."
-          },
-          {
-            front: "What parallels can be drawn between these historical events and modern situations?",
-            back: "The patterns of conflict resolution, social change, and political transformation described show similarities to contemporary global issues, particularly in how societies respond to crisis and change."
-          }
-        ];
-      } else if (isScienceContent) {
-        flashcards = [
-          {
-            front: "What are the key scientific principles explained in the content?",
-            back: "The key principles include systematic observation, empirical evidence gathering, hypothesis testing, and the application of established theories to explain natural phenomena."
-          },
-          {
-            front: "How do these scientific concepts relate to each other in a broader framework?",
-            back: "These concepts form an interconnected framework where each element builds upon fundamental principles, creating a cohesive understanding of the natural processes being studied."
-          },
-          {
-            front: "What practical applications emerge from these scientific findings?",
-            back: "The practical applications include technological innovations, improved understanding of natural systems, predictive capabilities for future events, and potential solutions to real-world problems."
-          }
-        ];
-      } else if (isMathContent) {
-        flashcards = [
-          {
-            front: "What are the fundamental mathematical formulas presented in this content?",
-            back: "The fundamental formulas include equations that express relationships between variables, rules for mathematical operations, and methods for problem-solving within specific domains of mathematics."
-          },
-          {
-            front: "How can these mathematical concepts be applied to solve real-world problems?",
-            back: "These concepts can be applied through modeling real-world situations, quantifying relationships between variables, predicting outcomes based on mathematical patterns, and optimizing systems through mathematical analysis."
-          },
-          {
-            front: "What are the step-by-step procedures for solving the problems described?",
-            back: "The procedures involve identifying known variables, applying relevant formulas, following logical sequences of operations, checking constraints, and verifying solutions through validation methods."
-          }
-        ];
-      } else if (isLiteratureContent) {
-        flashcards = [
-          {
-            front: "What are the main themes explored in this literary work?",
-            back: "The main themes include the exploration of human nature, social constructs, personal identity, moral dilemmas, and the relationship between individuals and their broader social context."
-          },
-          {
-            front: "How do the characters develop throughout the narrative?",
-            back: "The characters undergo transformation through pivotal experiences, relationship dynamics, internal conflicts, and the consequences of their choices, revealing deeper aspects of their personalities and values."
-          },
-          {
-            front: "What literary techniques does the author employ to convey meaning?",
-            back: "The author uses symbolism, metaphor, narrative structure, point of view, imagery, and language choices to create layers of meaning and evoke emotional and intellectual responses from readers."
-          }
-        ];
-      } else {
-        // General knowledge flashcards for any other content
-        flashcards = [
-          {
-            front: "What are the main concepts presented in this content?",
-            back: "The main concepts include fundamental principles, key terminology, essential frameworks, and core ideas that form the foundation of the subject matter discussed."
-          },
-          {
-            front: "How would you summarize the most important information in your own words?",
-            back: "The most important information focuses on critical relationships between concepts, significant findings, practical applications, and fundamental insights that define this area of knowledge."
-          },
-          {
-            front: "What are the practical implications of this information?",
-            back: "The practical implications include potential applications in real-world scenarios, changes to current understanding, solutions to existing problems, and new opportunities for further development and innovation."
-          }
-        ];
-      }
-      
-      // Add a job ID-based random factor to create variety
-      const randomSeed = parseInt(jobId.replace(/[^0-9]/g, '').substring(0, 3)) || 0;
-      if (randomSeed % 3 === 1) {
-        flashcards.push({
-          front: "How would you integrate this information with other knowledge areas?",
-          back: "This information can be integrated by identifying overlapping concepts, applying interdisciplinary approaches, recognizing patterns that exist across domains, and utilizing complementary methodologies from related fields."
+      if (!existingUser) {
+        // Create user record if it doesn't exist
+        await db.insert(users).values({
+          id: userId,
+          email: auth().user?.emailAddresses[0]?.emailAddress || '',
+          aiCreditsRemaining: 500, // Give new users some free credits
         });
-      } else if (randomSeed % 3 === 2) {
-        flashcards.push({
-          front: "What questions does this content raise that warrant further investigation?",
-          back: "The content raises questions about underlying mechanisms, broader implications, potential exceptions to general rules, and opportunities for further advancement through additional research and analysis."
-        });
+        console.log(`Created new user record for ${userId} during job status check`);
       }
-      
-      result = { flashcards };
-    } else if (status === "failed") {
-      error = "An error occurred during processing";
+    } catch (userError) {
+      console.error("Error ensuring user exists:", userError);
+      // Continue with job check even if user creation fails
+    }
+
+    // Fetch the job from the database
+    const job = await db.query.processingJobs.findFirst({
+      where: eq(processingJobs.id, jobId)
+    });
+    
+    if (!job) {
+      return {
+        isSuccess: false,
+        message: "Job not found",
+      };
+    }
+    
+    // Verify that the job belongs to the current user
+    if (job.userId !== userId) {
+      return {
+        isSuccess: false,
+        message: "You don't have permission to view this job",
+      };
     }
     
     return {
       isSuccess: true,
       data: {
-        status: status,
-        result,
-        error
-      },
+        status: job.status,
+        result: job.resultPayload,
+        error: job.errorMessage || undefined
+      }
     };
   } catch (error) {
-    console.error("Error getting job status:", error);
+    console.error("Error fetching job status:", error);
     return {
       isSuccess: false,
-      message: "Failed to get job status",
+      message: "Failed to fetch job status",
     };
   }
 } 

@@ -6,31 +6,7 @@ import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
-
-// Mock data for demonstration
-const MOCK_DECKS = [
-  {
-    id: "deck_1",
-    name: "Introduction to Biology",
-    description: "Basic concepts of biology",
-    cardCount: 24,
-    createdAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000),
-  },
-  {
-    id: "deck_2",
-    name: "World History",
-    description: "Key events in world history",
-    cardCount: 32,
-    createdAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000),
-  },
-  {
-    id: "deck_3",
-    name: "Spanish Vocabulary",
-    description: "Common Spanish words and phrases",
-    cardCount: 50,
-    createdAt: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000),
-  }
-];
+import { getDecksAction } from "@/actions/db/decks";
 
 export default function DecksPage() {
   const [decks, setDecks] = useState<any[]>([]);
@@ -38,13 +14,17 @@ export default function DecksPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Simulate loading decks
     const loadDecks = async () => {
       setIsLoading(true);
       try {
-        // Simulate API delay
-        await new Promise(resolve => setTimeout(resolve, 800));
-        setDecks(MOCK_DECKS);
+        const result = await getDecksAction();
+        
+        if (result.isSuccess) {
+          setDecks(result.data || []);
+        } else {
+          setError(result.message || "Failed to load decks");
+          toast.error(result.message || "Failed to load decks");
+        }
       } catch (err) {
         setError("Failed to load decks");
         toast.error("Failed to load decks");
@@ -101,11 +81,14 @@ export default function DecksPage() {
               <Card className="hover:bg-accent/50 h-full transition-colors">
                 <CardHeader>
                   <CardTitle>{deck.name}</CardTitle>
-                  <p className="text-sm text-muted-foreground">{deck.description}</p>
+                  <p className="text-sm text-muted-foreground">{deck.description || ""}</p>
                 </CardHeader>
                 <CardContent>
                   <div className="flex justify-between items-center mb-4">
-                    <span className="text-sm text-muted-foreground">{deck.cardCount} cards</span>
+                    <span className="text-sm text-muted-foreground">
+                      {/* Add actual card count if available */}
+                      {deck.cardCount || 0} cards
+                    </span>
                     <span className="text-sm text-muted-foreground">
                       {new Date(deck.createdAt).toLocaleDateString()}
                     </span>

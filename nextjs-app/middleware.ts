@@ -10,10 +10,8 @@ export default authMiddleware({
     "/sign-up",
     "/api/webhooks/clerk",
     "/api/webhooks/ai-service-status",
+    "/api/auth/ensure-user",
   ],
-  async afterAuth(auth, req, evt) {
-    // Your custom code here
-  },
   ignoredRoutes: [
     "/((?!api|trpc))(_next.*|.+.[w]+$)",
   ],
