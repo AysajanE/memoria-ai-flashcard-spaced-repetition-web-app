@@ -1,7 +1,14 @@
+/**
+ * @file users.ts
+ * @description
+ *  Schema for the "users" table, linking Clerk user IDs.
+ *  Tracks AI credits, subscription/billing data, study usage stats.
+ */
+
 import { pgTable, text, integer, timestamp } from "drizzle-orm/pg-core";
 
 export const users = pgTable("users", {
-  id: text("id").primaryKey(), // Clerk ID
+  id: text("id").primaryKey(), // Clerk user ID
   email: text("email").notNull(),
   aiCreditsRemaining: integer("ai_credits_remaining").default(-1).notNull(),
   stripeCustomerId: text("stripe_customer_id"),

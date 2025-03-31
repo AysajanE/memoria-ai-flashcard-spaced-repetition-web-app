@@ -1,3 +1,16 @@
+/**
+ * @file decks.ts
+ * @description
+ *  Drizzle schema for the "decks" table.
+ *  Stores user's named collections of flashcards.
+ *
+ * Key columns:
+ *  - id (uuid) with default: uuid_generate_v4()
+ *  - userId references users.id onDelete: CASCADE
+ *  - name: deck name
+ *  - createdAt / updatedAt: timestamps
+ */
+
 import { pgTable, uuid, text, timestamp, index } from "drizzle-orm/pg-core";
 import { users } from "./users";
 import { sql } from "drizzle-orm";
@@ -5,7 +18,7 @@ import { sql } from "drizzle-orm";
 export const decks = pgTable(
   "decks",
   {
-    id: uuid("id").primaryKey().default(sql`uuid_generate_v4()`),
+    id: uuid("id").primaryKey().defaultRandom(),
     userId: text("user_id")
       .references(() => users.id, { onDelete: "cascade" })
       .notNull(),

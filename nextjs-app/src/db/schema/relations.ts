@@ -1,3 +1,10 @@
+/**
+ * @file relations.ts
+ * @description
+ *  Defines Drizzle 'relations' for advanced referencing between tables.
+ *  Allows direct property references in queries (via drizzle-orm relations).
+ */
+
 import { relations } from "drizzle-orm";
 import { users } from "./users";
 import { decks } from "./decks";

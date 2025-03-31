@@ -1,3 +1,10 @@
+/**
+ * @file flashcards.ts
+ * @description
+ *  Schema for the "flashcards" table.
+ *  Each flashcard belongs to a deck and user, with SRS fields for scheduling reviews.
+ */
+
 import {
   pgTable,
   uuid,
@@ -6,16 +13,16 @@ import {
   integer,
   decimal,
   index,
+  sql,
 } from "drizzle-orm/pg-core";
 import { users } from "./users";
 import { decks } from "./decks";
 import { cardTypeEnum } from "./cardTypes";
-import { sql } from "drizzle-orm";
 
 export const flashcards = pgTable(
   "flashcards",
   {
-    id: uuid("id").primaryKey().default(sql`uuid_generate_v4()`),
+    id: uuid("id").primaryKey().defaultRandom(),
     deckId: uuid("deck_id")
       .references(() => decks.id, { onDelete: "cascade" })
       .notNull(),

@@ -1,3 +1,10 @@
+/**
+ * @file processingJobs.ts
+ * @description
+ *  Schema for AI job tracking in "processing_jobs".
+ *  Each record tracks the status of an AI generation or summarization process.
+ */
+
 import {
   pgTable,
   text,
@@ -6,9 +13,9 @@ import {
   timestamp,
   pgEnum,
   index,
+  sql,
 } from "drizzle-orm/pg-core";
 import { users } from "./users";
-import { sql } from "drizzle-orm";
 
 export const jobTypeEnum = pgEnum("job_type", ["generate-cards"]);
 export const jobStatusEnum = pgEnum("job_status", [
@@ -21,7 +28,7 @@ export const jobStatusEnum = pgEnum("job_status", [
 export const processingJobs = pgTable(
   "processing_jobs",
   {
-    id: uuid("id").primaryKey().default(sql`uuid_generate_v4()`),
+    id: uuid("id").primaryKey().defaultRandom(),
     userId: text("user_id").references(() => users.id, {
       onDelete: "set null",
     }),
@@ -30,7 +37,7 @@ export const processingJobs = pgTable(
     inputPayload: jsonb("input_payload").notNull(),
     resultPayload: jsonb("result_payload"),
     errorMessage: text("error_message"),
-    errorDetail: jsonb("error_detail"), // Detailed error information for better client handling
+    errorDetail: jsonb("error_detail"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),

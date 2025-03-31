@@ -15,6 +15,13 @@
       "when": 1743332425686,
       "tag": "0001_thin_scream",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1743460445566,
+      "tag": "0002_remarkable_skrulls",
+      "breakpoints": true
     }
   ]
 }
