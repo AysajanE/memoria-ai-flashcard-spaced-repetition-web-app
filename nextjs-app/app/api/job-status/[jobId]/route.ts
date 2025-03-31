@@ -16,6 +16,8 @@ export async function GET(
   { params }: { params: { jobId: string } }
 ) {
   try {
+    console.log(`Job status check for ${params.jobId}`);
+    
     // Get authenticated user
     const { userId } = auth();
     if (!userId) {
@@ -47,7 +49,7 @@ export async function GET(
       );
     }
 
-    // Return job details
+    // Return job details with timestamp for debugging
     return NextResponse.json({
       id: job.id,
       status: job.status,
@@ -55,11 +57,14 @@ export async function GET(
       errorMessage: job.errorMessage,
       createdAt: job.createdAt,
       updatedAt: job.updatedAt,
+      completedAt: job.completedAt,
+      currentTime: new Date(),
+      ageInSeconds: job.createdAt ? Math.floor((Date.now() - job.createdAt.getTime()) / 1000) : null
     });
   } catch (error) {
     console.error("Error fetching job status:", error);
     return NextResponse.json(
-      { error: "Internal Server Error" },
+      { error: "Internal Server Error", details: String(error) },
       { status: 500 }
     );
   }

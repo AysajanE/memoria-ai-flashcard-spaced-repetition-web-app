@@ -20,7 +20,18 @@ def count_tokens(text: str, model_name: str) -> int:
         ValueError: If model_name is invalid or tokenization fails
     """
     try:
-        encoding = tiktoken.encoding_for_model(model_name)
+        # Try to get the model-specific encoding
+        try:
+            encoding = tiktoken.encoding_for_model(model_name)
+        except KeyError:
+            # If the specific model isn't found, fallback to cl100k_base for newer GPT models
+            logger.warning(f"Model {model_name} not found in tiktoken. Using cl100k_base fallback.")
+            if 'gpt-4' in model_name or 'gpt-3.5' in model_name:
+                encoding = tiktoken.get_encoding("cl100k_base")
+            else:
+                # For other models, use p50k_base as a fallback
+                encoding = tiktoken.get_encoding("p50k_base")
+                
         return len(encoding.encode(text))
     except Exception as e:
         logger.error(f"Error counting tokens for model {model_name}: {str(e)}")

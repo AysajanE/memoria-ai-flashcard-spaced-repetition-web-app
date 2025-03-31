@@ -4,15 +4,33 @@ import logging
 from typing import Dict, List, Any
 import requests
 from app.config import settings
-from app.core.ai_caller import generate_cards_with_ai, TokenLimitError, AIServiceError
+from app.core.ai_caller import generate_cards_with_ai, TokenLimitError, AIServiceError, AuthError, RateLimitError, NetworkError, AIModelError
 from app.core.text_processing import count_tokens
-from app.schemas.responses import WebhookPayload, GenerateCardsResult
+from app.schemas.responses import WebhookPayload, GenerateCardsResult, ErrorDetail, ErrorCategory
 
 logger = logging.getLogger(__name__)
 
 # Constants
 MAX_INPUT_TOKENS = settings.MAX_INPUT_TOKENS
 MAX_OUTPUT_TOKENS = settings.MAX_OUTPUT_TOKENS
+
+# Error classes
+class ParseError(Exception):
+    """Custom exception for parsing errors"""
+    category = "parse_error"
+    retryable = False
+    code = "INVALID_RESPONSE"
+    suggested_action = "Contact support if the issue persists."
+    context = None
+    
+    def __init__(self, message, code=None, context=None, suggested_action=None):
+        super().__init__(message)
+        if code:
+            self.code = code
+        if context:
+            self.context = context
+        if suggested_action:
+            self.suggested_action = suggested_action
 
 class WebhookError(Exception):
     """Custom exception for webhook-related errors"""
@@ -45,13 +63,71 @@ def clean_json_string(json_str: str) -> str:
     return json_str
 
 def parse_ai_response(response_text: str) -> Dict[str, Any]:
-    """Parse AI response with improved error handling"""
+    """Parse AI response with improved error handling and Anthropic response format support"""
     try:
         # Clean the response text
         cleaned_text = clean_json_string(response_text)
         
-        # Attempt to parse
-        result = json.loads(cleaned_text)
+        # First try direct JSON parsing
+        try:
+            result = json.loads(cleaned_text)
+        except json.JSONDecodeError:
+            # If direct parsing fails, try to extract JSON from text response
+            # This is common with Anthropic models that might wrap JSON in explanatory text
+            import re
+            json_match = re.search(r'(\{.*\})', cleaned_text, re.DOTALL)
+            if json_match:
+                try:
+                    result = json.loads(json_match.group(1))
+                except json.JSONDecodeError:
+                    # If we still can't parse it, try a more aggressive approach
+                    # Find anything that looks like a JSON object or array
+                    json_match = re.search(r'(\{[\s\S]*\}|\[[\s\S]*\])', cleaned_text)
+                    if json_match:
+                        result = json.loads(json_match.group(1))
+                    else:
+                        raise
+            else:
+                # If we still can't find JSON, handle manually by creating a structure
+                # This is a fallback to handle completely non-JSON responses
+                card_pairs = []
+                lines = response_text.split('\n')
+                current_front = None
+                current_back = ""
+                
+                for line in lines:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    
+                    # Look for question/answer patterns
+                    if line.startswith("Q:") or line.startswith("Question:"):
+                        # If we have a previous Q/A pair, save it
+                        if current_front is not None:
+                            card_pairs.append({"front": current_front, "back": current_back.strip()})
+                            current_back = ""
+                        
+                        # Extract the new question
+                        current_front = line.split(":", 1)[1].strip()
+                    elif line.startswith("A:") or line.startswith("Answer:"):
+                        # Extract the answer
+                        current_back = line.split(":", 1)[1].strip()
+                    elif current_front is not None:
+                        # Append to current back if we're in the middle of a pair
+                        current_back += " " + line
+                
+                # Don't forget the last pair
+                if current_front is not None:
+                    card_pairs.append({"front": current_front, "back": current_back.strip()})
+                
+                if card_pairs:
+                    result = {"cards": card_pairs}
+                else:
+                    raise ParseError(
+                        "Could not extract flashcards from AI response",
+                        code="EXTRACTION_FAILED",
+                        context={"response_text": response_text[:500] + "..." if len(response_text) > 500 else response_text}
+                    )
         
         # Validate basic structure
         if not isinstance(result, dict):
@@ -141,9 +217,13 @@ def send_webhook_with_retry(
     
     for attempt in range(max_retries):
         try:
+            # Manually serialize to JSON to handle datetime objects
+            # Note: Using model_dump(mode="json") to ensure datetime objects are serialized properly
+            json_payload = payload.model_dump(mode="json")
+            
             response = requests.post(
                 settings.NEXTJS_APP_STATUS_WEBHOOK_URL,
-                json=payload.model_dump(),
+                json=json_payload,
                 headers={
                     "x-internal-api-key": settings.INTERNAL_API_KEY,
                     "content-type": "application/json",
@@ -285,6 +365,9 @@ async def process_card_generation(
             num_cards=num_cards
         )
         
+        # Log the raw response for debugging
+        logger.debug(f"Raw AI response for job {job_id}: {result[:500]}...")
+        
         # Parse and validate AI response
         parsed_result = parse_ai_response(result)
         
@@ -320,7 +403,7 @@ async def process_card_generation(
         webhook_payload = WebhookPayload(
             jobId=job_id,
             status="completed",
-            resultPayload=result_payload.model_dump()
+            resultPayload=result_payload.model_dump(mode="json")
         )
         
         send_webhook_with_retry(webhook_payload)

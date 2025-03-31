@@ -1,5 +1,5 @@
 from typing import List, Optional, Literal, Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime
 from enum import Enum
 
@@ -43,12 +43,20 @@ class ErrorDetail(BaseModel):
 
 class WebhookPayload(BaseModel):
     """Schema for the webhook payload sent to Next.js"""
+    model_config = ConfigDict(json_encoders={datetime: lambda dt: dt.isoformat()})
+    
     jobId: str = Field(..., description="Unique identifier for the processing job")
     status: Literal["completed", "failed"] = Field(..., description="Final status of the job")
     resultPayload: Optional[dict] = Field(None, description="Generated cards or other results")
     errorDetail: Optional[ErrorDetail] = Field(None, description="Detailed error information if status is failed")
     errorMessage: Optional[str] = Field(None, description="Simple error message if status is failed (for backward compatibility)")
     completedAt: datetime = Field(default_factory=datetime.utcnow)
+    
+    def model_dump(self, **kwargs):
+        """Override model_dump to ensure datetime is properly serialized"""
+        if 'mode' not in kwargs:
+            kwargs['mode'] = 'json'
+        return super().model_dump(**kwargs)
 
 
 class GenerateCardsResult(BaseModel):

@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { db } from "@/db";
 import { processingJobs } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, and, desc } from "drizzle-orm";
 import { users } from "@/db/schema";
 
 // Types for the action functions
@@ -108,6 +108,9 @@ export async function submitAiJobAction(
       const aiServiceUrl = process.env.AI_SERVICE_URL || 'http://localhost:8000';
       console.log(`Calling AI service at ${aiServiceUrl}`);
       
+      // Use a model name that's explicitly defined in the AI service .env file
+      const modelName = "claude-3-5-haiku-latest"; // Safer option from AI service .env.local
+      
       const response = await fetch(`${aiServiceUrl}/api/v1/generate-cards`, {
         method: 'POST',
         headers: {
@@ -118,7 +121,7 @@ export async function submitAiJobAction(
           jobId: jobRecord.id,
           text: userInputText,
           config: {
-            model: process.env.DEFAULT_AI_MODEL || 'gpt-4', 
+            model: modelName,
             cardType: 'qa',
             numCards: 5,
           }
@@ -126,8 +129,18 @@ export async function submitAiJobAction(
       });
       
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(`AI service returned ${response.status}: ${JSON.stringify(errorData)}`);
+        let errorMessage = `AI service returned status ${response.status}`;
+        try {
+          const errorData = await response.json();
+          errorMessage += `: ${JSON.stringify(errorData)}`;
+        } catch (e) {
+          // If response isn't JSON, try to get text
+          const errorText = await response.text().catch(() => '');
+          if (errorText) {
+            errorMessage += `: ${errorText}`;
+          }
+        }
+        throw new Error(errorMessage);
       }
       
       // The AI service processes in the background and will call our webhook
@@ -362,6 +375,65 @@ export async function getJobStatusAction(
     return {
       isSuccess: false,
       message: "Failed to fetch job status",
+    };
+  }
+}
+
+// List all pending jobs for a user (for debugging purposes)
+export async function listPendingJobsAction(): Promise<ActionState<Array<{id: string, status: string, createdAt: Date}>>> {
+  try {
+    // Authentication check
+    const { userId } = auth();
+    if (!userId) {
+      return {
+        isSuccess: false,
+        message: "You must be logged in to perform this action",
+      };
+    }
+
+    // Ensure user exists in the database
+    try {
+      const existingUser = await db.query.users.findFirst({
+        where: eq(users.id, userId),
+      });
+      
+      if (!existingUser) {
+        // Create user record if it doesn't exist
+        await db.insert(users).values({
+          id: userId,
+          email: auth().user?.emailAddresses[0]?.emailAddress || '',
+          aiCreditsRemaining: 500, // Give new users some free credits
+        });
+        console.log(`Created new user record for ${userId} during pending jobs check`);
+      }
+    } catch (userError) {
+      console.error("Error ensuring user exists:", userError);
+      // Continue with job check even if user creation fails
+    }
+
+    // Get all pending jobs for the user
+    const pendingJobs = await db.query.processingJobs.findMany({
+      where: and(
+        eq(processingJobs.userId, userId),
+        eq(processingJobs.status, "pending")
+      ),
+      orderBy: (jobs, { desc }) => [desc(jobs.createdAt)],
+      columns: {
+        id: true,
+        status: true,
+        createdAt: true,
+      }
+    });
+    
+    return {
+      isSuccess: true,
+      data: pendingJobs
+    };
+  } catch (error) {
+    console.error("Error fetching pending jobs:", error);
+    return {
+      isSuccess: false,
+      message: "Failed to fetch pending jobs",
     };
   }
 } 
