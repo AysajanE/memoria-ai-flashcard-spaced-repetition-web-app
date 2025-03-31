@@ -1,42 +1,31 @@
-# Memoria - AI Flashcard Generator
+# Memoria AI Service (Next.js App)
 
-Memoria is an AI-powered web application that transforms learning materials into effective spaced repetition flashcards. It leverages AI models to analyze text and generate high-quality study materials.
-
-## AI Models
-
-The application supports multiple AI providers for flashcard generation:
-
-- **OpenAI**: Using `gpt-4o-mini` - A cost-effective model with excellent performance
-- **Anthropic**: Using `claude-haiku-3-5-latest` - A fast, efficient model suitable for most tasks
+This is the primary Next.js application for Memoria, an AI-powered flashcard and spaced repetition system.
 
 ## Features
 
-- Text input for flashcard generation
-- Multiple AI models to choose from
-- Support for Question/Answer and Cloze deletion formats
-- Interactive card editing
-- Anki export formatting
-- User accounts with usage limits
+- AI-driven flashcard generation
+- Spaced repetition study mode
+- Deck management
+- Progress tracking
+- User authentication (Clerk)
+- Basic subscription/billing scaffolding (Stripe)
 
-## Architecture
+## Environment Variables
 
-Memoria uses a hybrid architecture:
+We have updated `.env.example` to unify and clarify variable names:
 
-1. **Next.js App**: Frontend UI, user authentication, payment processing, and job orchestration
-2. **Python AI Service**: Handles AI processing (text processing, model calling, etc.)
+- `AI_SERVICE_BASE_URL` (instead of `AI_SERVICE_URL`) references the Python AI service location.
+- `INTERNAL_API_KEY` is the shared secret for verifying requests to/from the AI microservice.
+- `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`, etc., for Clerk authentication.
+- `DATABASE_URL` for your Postgres database.
+- Optional Stripe variables for payment (Phase 3).
 
-## Setup
+After copying `.env.example` to `.env.local`, fill in all necessary values. **Never** commit `.env.local`.
 
-### Prerequisites
+## Local Development
 
-- Node.js 18+
-- Python 3.9+
-- PostgreSQL (via Supabase)
-
-### Next.js App Setup
-
-1. Navigate to the `nextjs-app` directory
-2. Install dependencies:
+1. **Install dependencies**:
    ```bash
    npm install
    ```

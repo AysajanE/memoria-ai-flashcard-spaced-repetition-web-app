@@ -1,65 +1,77 @@
+"""
+@file config.py
+@description
+  Pydantic-based configuration for the Memoria AI Service.
+
+Key Environment Variables:
+  - INTERNAL_API_KEY: Shared secret used to validate requests between Next.js and the AI service.
+  - NEXTJS_APP_STATUS_WEBHOOK_URL: Webhook endpoint in the Next.js app for job completion.
+  - OPENAI_API_KEY / ANTHROPIC_API_KEY: Credentials for AI providers.
+  - DEFAULT_OPENAI_MODEL / DEFAULT_ANTHROPIC_MODEL: Defaults for generation if none provided.
+  - AI_MODELS: JSON string of available models and their metadata.
+  - API_HOST / API_PORT: Host/port to run the service on (passed to uvicorn).
+  - ENVIRONMENT: "development", "staging", "production", etc.
+  - LOG_LEVEL: Logging level, e.g., "INFO", "DEBUG", ...
+"""
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import List, Dict, Any
 
 
 class Settings(BaseSettings):
-    """Application settings loaded from environment variables."""
+    """Application settings loaded from environment variables.
     
-    # Add the missing fields
+    Fields:
+      - API_HOST, API_PORT: Where to run the FastAPI server (used by uvicorn).
+      - ENVIRONMENT: e.g. 'development', 'staging', 'production'.
+      - LOG_LEVEL: e.g. 'INFO', 'DEBUG', 'ERROR', ...
+      - INTERNAL_API_KEY: Shared secret for verifying requests.
+      - NEXTJS_APP_STATUS_WEBHOOK_URL: Next.js endpoint to POST job results.
+      - CORS_ORIGINS: List of origins allowed for cross-origin requests.
+      - OPENAI_API_KEY / ANTHROPIC_API_KEY: Keys for AI providers.
+      - DEFAULT_OPENAI_MODEL / DEFAULT_ANTHROPIC_MODEL: Chosen defaults if none specified.
+      - AI_MODELS: Dictionary (could be from env) describing supported models.
+      - MAX_INPUT_TOKENS / MAX_OUTPUT_TOKENS: Basic constraints for text processing.
+      - DEFAULT_SYSTEM_PROMPT: The prompt template for generating flashcards.
+    """
+
+    # Main server configuration
     API_HOST: str = "0.0.0.0"
     API_PORT: int = 8000
-
-    # AI Service Base URL
-    AI_SERVICE_BASE_URL: str = "http://localhost:8000"
-
-    # Environment and logging
     ENVIRONMENT: str = "development"
     LOG_LEVEL: str = "INFO"
-    
+
     # API Keys and Authentication
     INTERNAL_API_KEY: str
     NEXTJS_APP_STATUS_WEBHOOK_URL: str
-    
+
     # CORS Settings
-    CORS_ORIGINS: List[str] = ["*"]
-    
+    CORS_ORIGINS: List[str] = ["*"]  # Allow all by default. Adjust as needed.
+
     # AI Provider API Keys
     OPENAI_API_KEY: str = ""
     ANTHROPIC_API_KEY: str = ""
-    
+
     # AI Model Configuration
     # Default models to use
     DEFAULT_OPENAI_MODEL: str = "gpt-4o-mini"
     DEFAULT_ANTHROPIC_MODEL: str = "claude-haiku-3-5-latest"
-    
-    # All available models
+
+    # Optional JSON string describing additional model configurations
     AI_MODELS: Dict[str, Dict[str, Any]] = {
-        # OpenAI models
+        # Example fallback if not provided via env
         "gpt-4o-mini": {
             "provider": "openai",
             "max_input_tokens": 128000,
             "max_output_tokens": 4096,
-            "description": "Efficient, cost-effective OpenAI model with good performance"
-        },
-        "gpt-3.5-turbo": {
-            "provider": "openai",
-            "max_input_tokens": 16385,
-            "max_output_tokens": 4096,
-            "description": "Legacy model, prefer gpt-4o-mini for better performance"
-        },
-        # Anthropic models
-        "claude-haiku-3-5-latest": {
-            "provider": "anthropic",
-            "max_input_tokens": 200000,
-            "max_output_tokens": 4096,
-            "description": "Fast, efficient Anthropic model suitable for most tasks"
+            "description": "Efficient, cost-effective OpenAI model with good performance",
         }
     }
-    
+
     # Token Limits
     MAX_INPUT_TOKENS: int = 10000
     MAX_OUTPUT_TOKENS: int = 4096
-    
+
     # Default System Prompt
     DEFAULT_SYSTEM_PROMPT: str = """
     You are an AI assistant specialized in creating effective spaced repetition flashcards to enhance learning and memory retention. Your task is to convert the provided material into a set of {num_cards} high-quality {card_type} flashcards, clearly formatted as valid JSON.
@@ -122,45 +134,45 @@ class Settings(BaseSettings):
     }
     ```
     """
-    
-    class Config:
-        env_file = ".env.local"
-        env_file_encoding = "utf-8"
-        extra = "ignore"  # Add this to ignore extra fields
+
+    model_config = SettingsConfigDict(
+        env_file=".env.local",
+        env_file_encoding="utf-8",
+        extra="ignore"
+    )
 
 # Create a singleton instance
 settings = Settings()
 
-# Helper function to get model configuration
 def get_model_config(model_name: str = None) -> Dict[str, Any]:
-    """Get configuration for a specific model or default model based on provider.
-    
+    """
+    Get configuration for a specific model or default model based on provider.
+
     Args:
         model_name: Name of the model to get config for. If None, uses default OpenAI model.
-        
+
     Returns:
-        Dict containing model configuration
+        Dict containing model configuration and metadata (provider, token limits, etc.)
     """
     if not model_name:
         model_name = settings.DEFAULT_OPENAI_MODEL
-        
-    # If model exists in our configuration, return its config
+
+    # If the model name is recognized in the dictionary, return its data
     if model_name in settings.AI_MODELS:
         return {
             "name": model_name,
             **settings.AI_MODELS[model_name]
         }
-    
-    # If model doesn't exist, determine provider based on model name
+
+    # If not, guess provider from the prefix
     if model_name.startswith("gpt-"):
         provider = "openai"
     elif model_name.startswith("claude-"):
         provider = "anthropic"
     else:
-        # Default to OpenAI if we can't determine
         provider = "openai"
-        
-    # Return a basic config with some safe defaults
+
+    # Provide a fallback config using the service-level default token limits
     return {
         "name": model_name,
         "provider": provider,
