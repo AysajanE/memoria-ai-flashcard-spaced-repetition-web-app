@@ -9,6 +9,9 @@ class Settings(BaseSettings):
     API_HOST: str = "0.0.0.0"
     API_PORT: int = 8000
 
+    # AI Service Base URL
+    AI_SERVICE_BASE_URL: str = "http://localhost:8000"
+
     # Environment and logging
     ENVIRONMENT: str = "development"
     LOG_LEVEL: str = "INFO"

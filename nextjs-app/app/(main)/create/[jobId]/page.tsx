@@ -71,8 +71,8 @@ export default function JobStatusPage({ params }: { params: { jobId: string } })
             <div className="space-y-4">
               <h3 className="font-medium">Generated Flashcards:</h3>
               <div className="space-y-4 mt-4">
-                {result?.flashcards ? (
-                  result.flashcards.map((card: any, index: number) => (
+                {result?.cards ? (
+                  result.cards.map((card: any, index: number) => (
                     <div key={index} className="bg-card p-5 rounded-lg border border-border shadow-sm hover:shadow-md transition-all">
                       <div className="mb-4">
                         <h4 className="text-sm font-medium text-muted-foreground mb-2">QUESTION</h4>
