@@ -5,6 +5,19 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/shared/page-header";
 import { getJobStatusAction } from "@/actions/ai";
+import { 
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { toast } from "sonner";
+import { saveJobFlashcardsAction } from "@/actions/db/decks";
+import { ChangeEvent } from "react";
 
 export default function JobStatusPage({ params }: { params: { jobId: string } }) {
   const router = useRouter();
@@ -12,6 +25,9 @@ export default function JobStatusPage({ params }: { params: { jobId: string } })
   const [status, setStatus] = useState<'pending' | 'processing' | 'completed' | 'failed'>('pending');
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [deckName, setDeckName] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     const checkStatus = async () => {
@@ -19,11 +35,13 @@ export default function JobStatusPage({ params }: { params: { jobId: string } })
         const response = await getJobStatusAction(jobId);
         
         if (response.isSuccess && response.data) {
-          setStatus(response.data.status);
+          // Convert the string status to our enum type
+          const jobStatus = response.data.status as 'pending' | 'processing' | 'completed' | 'failed';
+          setStatus(jobStatus);
           
-          if (response.data.status === 'completed') {
+          if (jobStatus === 'completed') {
             setResult(response.data.result);
-          } else if (response.data.status === 'failed') {
+          } else if (jobStatus === 'failed') {
             setError(response.data.error || 'An error occurred during processing');
           }
         } else {
@@ -49,6 +67,31 @@ export default function JobStatusPage({ params }: { params: { jobId: string } })
 
     return () => clearInterval(interval);
   }, [jobId, status]);
+
+  const handleSaveFlashcards = async () => {
+    if (!deckName.trim()) {
+      toast.error("Please enter a deck name");
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const response = await saveJobFlashcardsAction(jobId, deckName);
+      
+      if (response.isSuccess) {
+        toast.success("Flashcards saved to deck successfully!");
+        setIsDialogOpen(false);
+        router.push("/decks");
+      } else {
+        toast.error(response.message || "Failed to save flashcards to deck");
+      }
+    } catch (err) {
+      console.error("Error saving flashcards:", err);
+      toast.error("An unexpected error occurred");
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   return (
     <div className="container py-6 space-y-6">
@@ -89,7 +132,7 @@ export default function JobStatusPage({ params }: { params: { jobId: string } })
                 )}
               </div>
               <div className="flex gap-4 pt-6">
-                <Button onClick={() => router.push("/decks")}>Save & View Decks</Button>
+                <Button onClick={() => setIsDialogOpen(true)}>Save & View Decks</Button>
                 <Button variant="outline" onClick={() => router.push("/create")}>Create New Cards</Button>
               </div>
             </div>
@@ -129,6 +172,41 @@ export default function JobStatusPage({ params }: { params: { jobId: string } })
           )}
         </div>
       </div>
+
+      {/* Deck Creation Dialog */}
+      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Save Flashcards</DialogTitle>
+            <DialogDescription>
+              Create a new deck to save your generated flashcards.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="deckName" className="text-right">
+                Deck Name
+              </Label>
+              <Input
+                id="deckName"
+                value={deckName}
+                onChange={(e: ChangeEvent<HTMLInputElement>) => setDeckName(e.target.value)}
+                className="col-span-3"
+                placeholder="e.g. Biology 101, Spanish Vocab"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button 
+              type="submit" 
+              onClick={handleSaveFlashcards}
+              disabled={isSaving}
+            >
+              {isSaving ? "Saving..." : "Save Flashcards"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 } 
