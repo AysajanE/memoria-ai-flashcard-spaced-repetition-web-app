@@ -1,102 +1,194 @@
 import logging
-from typing import List
+from typing import List, Dict, Any, Optional
 
 import tiktoken
+from app.config import get_model_config
 
 logger = logging.getLogger(__name__)
 
-def count_tokens(text: str, model_name: str) -> int:
+def count_tokens(text: str, model_name: Optional[str] = None) -> int:
     """
-    Count the number of tokens in a text string for a given model.
+    Count tokens in a text string using the appropriate tokenizer for the model.
     
     Args:
-        text: The input text to count tokens for
-        model_name: The name of the model to use for tokenization
+        text: The text to count tokens for
+        model_name: The name of the model to count tokens for. Uses default if None.
         
     Returns:
-        int: Number of tokens in the text
-        
-    Raises:
-        ValueError: If model_name is invalid or tokenization fails
+        int: The number of tokens in the text
     """
+    if not text:
+        return 0
+        
+    # Get model configuration
+    model_config = get_model_config(model_name)
+    provider = model_config["provider"]
+    model = model_config["name"]
+    
     try:
-        # Try to get the model-specific encoding
-        try:
-            encoding = tiktoken.encoding_for_model(model_name)
-        except KeyError:
-            # If the specific model isn't found, fallback to cl100k_base for newer GPT models
-            logger.warning(f"Model {model_name} not found in tiktoken. Using cl100k_base fallback.")
-            if 'gpt-4' in model_name or 'gpt-3.5' in model_name:
+        # OpenAI models - use tiktoken
+        if provider == "openai":
+            # Select the appropriate encoding for the model
+            if "gpt-4" in model:
+                encoding = tiktoken.encoding_for_model("gpt-4")
+            elif "gpt-3.5-turbo" in model:
+                encoding = tiktoken.encoding_for_model("gpt-3.5-turbo")
+            else:
+                # Default to cl100k_base for newer models
                 encoding = tiktoken.get_encoding("cl100k_base")
-            else:
-                # For other models, use p50k_base as a fallback
-                encoding = tiktoken.get_encoding("p50k_base")
                 
-        return len(encoding.encode(text))
+            # Count tokens
+            token_count = len(encoding.encode(text))
+            return token_count
+            
+        # Anthropic models - approximate token count
+        elif provider == "anthropic":
+            # Anthropic uses roughly 4 characters per token as a heuristic
+            # This is an approximation - Claude uses BPEs but doesn't expose tokenizers directly
+            # See: https://docs.anthropic.com/claude/docs/token-counting
+            return len(text) // 4 + (1 if len(text) % 4 > 0 else 0)
+            
+        else:
+            # Unknown provider, use a conservative estimate
+            logger.warning(f"Unknown provider '{provider}' for token counting, using approximation")
+            # Words ÷ 0.75 is a common approximation (4 tokens ≈ 3 words)
+            words = len(text.split())
+            return int(words / 0.75)
+            
     except Exception as e:
-        logger.error(f"Error counting tokens for model {model_name}: {str(e)}")
-        raise ValueError(f"Failed to count tokens: {str(e)}")
+        logger.error(f"Error counting tokens: {str(e)}")
+        # Fallback to character-based approximation
+        return len(text) // 4
 
-def chunk_text(text: str, max_tokens_per_chunk: int, model_name: str) -> List[str]:
+def chunk_text(text: str, max_tokens: int = 4000, model_name: Optional[str] = None) -> List[str]:
     """
-    Split text into chunks that fit within token limits.
+    Split text into chunks that don't exceed token limits.
     
     Args:
-        text: The input text to chunk
-        max_tokens_per_chunk: Maximum tokens per chunk
-        model_name: The name of the model to use for tokenization
+        text: The text to chunk
+        max_tokens: Maximum tokens per chunk
+        model_name: Model name to use for token counting
         
     Returns:
-        List[str]: List of text chunks
-        
-    Raises:
-        ValueError: If text is empty or chunking fails
+        List[str]: Text chunks
     """
-    if not text or len(text.strip()) == 0:
-        raise ValueError("Input text cannot be empty")
+    # If text is already small enough, return it as a single chunk
+    if count_tokens(text, model_name) <= max_tokens:
+        return [text]
         
-    try:
-        chunks = []
-        current_chunk = []
-        current_tokens = 0
+    # Split into paragraphs
+    paragraphs = text.split("\n\n")
+    chunks = []
+    current_chunk = ""
+    current_tokens = 0
+    
+    for paragraph in paragraphs:
+        paragraph_tokens = count_tokens(paragraph, model_name)
         
-        # Split text into paragraphs
-        paragraphs = [p.strip() for p in text.split('\n\n') if p.strip()]
-        
-        for paragraph in paragraphs:
-            paragraph_tokens = count_tokens(paragraph, model_name)
+        # If a single paragraph exceeds token limit, we need to split it
+        if paragraph_tokens > max_tokens:
+            # If we have content in current chunk, add it to chunks
+            if current_chunk:
+                chunks.append(current_chunk)
+                current_chunk = ""
+                current_tokens = 0
+                
+            # Split paragraph into sentences
+            sentences = paragraph.replace(". ", ".\n").split("\n")
+            sentence_chunk = ""
+            sentence_tokens = 0
             
-            # If a single paragraph exceeds the limit, split by sentences
-            if paragraph_tokens > max_tokens_per_chunk:
-                sentences = [s.strip() for s in paragraph.split('.') if s.strip()]
-                for sentence in sentences:
-                    sentence_tokens = count_tokens(sentence, model_name)
+            for sentence in sentences:
+                sentence_token_count = count_tokens(sentence, model_name)
+                
+                # If adding this sentence would exceed limit
+                if sentence_tokens + sentence_token_count > max_tokens:
+                    # Add current sentence chunk if not empty
+                    if sentence_chunk:
+                        chunks.append(sentence_chunk)
+                        sentence_chunk = ""
+                        sentence_tokens = 0
                     
-                    if current_tokens + sentence_tokens > max_tokens_per_chunk:
-                        if current_chunk:
-                            chunks.append(' '.join(current_chunk))
-                        current_chunk = [sentence]
-                        current_tokens = sentence_tokens
+                    # If a single sentence exceeds token limit, split by words
+                    if sentence_token_count > max_tokens:
+                        words = sentence.split()
+                        word_chunk = ""
+                        word_tokens = 0
+                        
+                        for word in words:
+                            word_token_count = count_tokens(word + " ", model_name)
+                            
+                            if word_tokens + word_token_count > max_tokens:
+                                chunks.append(word_chunk)
+                                word_chunk = word + " "
+                                word_tokens = word_token_count
+                            else:
+                                word_chunk += word + " "
+                                word_tokens += word_token_count
+                                
+                        if word_chunk:
+                            chunks.append(word_chunk)
                     else:
-                        current_chunk.append(sentence)
-                        current_tokens += sentence_tokens
-            else:
-                # If adding this paragraph would exceed the limit, start a new chunk
-                if current_tokens + paragraph_tokens > max_tokens_per_chunk:
-                    if current_chunk:
-                        chunks.append(' '.join(current_chunk))
-                    current_chunk = [paragraph]
-                    current_tokens = paragraph_tokens
+                        # Sentence fits in its own chunk
+                        chunks.append(sentence)
                 else:
-                    current_chunk.append(paragraph)
-                    current_tokens += paragraph_tokens
+                    # Add sentence to current sentence chunk
+                    sentence_chunk += sentence + " "
+                    sentence_tokens += sentence_token_count
+                    
+            # Add any remaining sentence chunk
+            if sentence_chunk:
+                chunks.append(sentence_chunk)
         
-        # Add the last chunk if it exists
-        if current_chunk:
-            chunks.append(' '.join(current_chunk))
+        # Check if adding paragraph would exceed token limit
+        elif current_tokens + paragraph_tokens > max_tokens:
+            # Add current chunk to chunks and start a new one
+            chunks.append(current_chunk)
+            current_chunk = paragraph + "\n\n"
+            current_tokens = paragraph_tokens
+        else:
+            # Add paragraph to current chunk
+            current_chunk += paragraph + "\n\n"
+            current_tokens += paragraph_tokens
             
-        return chunks
+    # Add any remaining content
+    if current_chunk:
+        chunks.append(current_chunk)
         
-    except Exception as e:
-        logger.error(f"Error chunking text: {str(e)}")
-        raise ValueError(f"Failed to chunk text: {str(e)}") 
+    return chunks
+
+def format_for_anki(cards: List[Dict[str, Any]], card_type: str = "qa") -> str:
+    """
+    Format flashcards for Anki import.
+    
+    Args:
+        cards: List of card dictionaries with front/back fields
+        card_type: Type of cards ("qa" or "cloze")
+        
+    Returns:
+        str: Formatted text for Anki import
+    """
+    lines = []
+    
+    if card_type == "qa":
+        # Basic Card format: question;answer
+        for card in cards:
+            front = card.get("front", "").replace(";", ",")
+            back = card.get("back", "").replace(";", ",")
+            lines.append(f"{front};{back}")
+    else:
+        # Cloze format: text with {{c1::cloze deletion}}
+        for card in cards:
+            front = card.get("front", "").replace(";", ",")
+            back = card.get("back", "").replace(";", ",")
+            
+            # Convert [...] format to Anki cloze format
+            if "[...]" in front:
+                formatted = front.replace("[...]", f"{{{{c1::{back}}}}}")
+            else:
+                # Fallback if proper cloze format not found
+                formatted = f"{front} {{{{c1::{back}}}}}"
+                
+            lines.append(formatted)
+            
+    return "\n".join(lines) 

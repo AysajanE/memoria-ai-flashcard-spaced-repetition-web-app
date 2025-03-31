@@ -104,48 +104,32 @@ export async function submitAiJobAction(
     
     // Call the AI Service API
     try {
-      // Check if AI_SERVICE_URL is defined
-      const aiServiceUrl = process.env.AI_SERVICE_URL || 'http://localhost:8000';
-      console.log(`Calling AI service at ${aiServiceUrl}`);
+      // Import the updated triggerCardGeneration function
+      const { triggerCardGeneration } = await import("@/lib/ai-client");
       
-      // Use a model name that's explicitly defined in the AI service .env file
-      const modelName = "claude-3-5-haiku-latest"; // Safer option from AI service .env.local
+      // Determine which model to use based on job type (can be customized)
+      // For simplicity, we'll use OpenAI for summarize and Anthropic for generate-prompts
+      const provider = validatedInput.data.jobType === "summarize" ? "openai" : "anthropic";
+      const model = provider === "openai" ? "gpt-4o-mini" : "claude-haiku-3-5-latest";
       
-      const response = await fetch(`${aiServiceUrl}/api/v1/generate-cards`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-internal-api-key': process.env.INTERNAL_API_KEY || '',
-        },
-        body: JSON.stringify({
-          jobId: jobRecord.id,
-          text: userInputText,
-          config: {
-            model: modelName,
-            cardType: 'qa',
-            numCards: 5,
-          }
-        }),
+      // Call the AI service
+      await triggerCardGeneration({
+        jobId: jobRecord.id,
+        text: userInputText,
+        model,
+        provider,
+        cardType: 'qa',
+        numCards: 5,
       });
       
-      if (!response.ok) {
-        let errorMessage = `AI service returned status ${response.status}`;
-        try {
-          const errorData = await response.json();
-          errorMessage += `: ${JSON.stringify(errorData)}`;
-        } catch (e) {
-          // If response isn't JSON, try to get text
-          const errorText = await response.text().catch(() => '');
-          if (errorText) {
-            errorMessage += `: ${errorText}`;
-          }
-        }
-        throw new Error(errorMessage);
-      }
-      
-      // The AI service processes in the background and will call our webhook
-      // when complete, so we just need to return the job ID
-    } catch (aiError: unknown) {
+      return {
+        isSuccess: true,
+        data: { 
+          jobId: jobRecord.id,
+          inputText: userInputText
+        },
+      };
+    } catch (aiError) {
       console.error('AI service request failed:', aiError);
       // Update job status to reflect the error
       await db.update(processingJobs)
@@ -161,14 +145,6 @@ export async function submitAiJobAction(
         message: "Failed to process with AI service",
       };
     }
-    
-    return {
-      isSuccess: true,
-      data: { 
-        jobId: jobRecord.id,
-        inputText: userInputText
-      },
-    };
   } catch (error) {
     console.error("Error submitting AI job:", error);
     return {

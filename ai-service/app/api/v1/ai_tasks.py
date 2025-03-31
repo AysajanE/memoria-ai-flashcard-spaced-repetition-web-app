@@ -6,6 +6,7 @@ from app.dependencies import validate_internal_api_key
 from app.schemas.ai_tasks import GenerateCardsRequest
 from app.core.logic import process_card_generation
 from app.core.ai_caller import TokenLimitError, AIServiceError
+from app.config import settings, get_model_config
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -27,9 +28,18 @@ async def process_ai_job(job_id: str, input_data: Dict[str, Any]) -> None:
             raise ValueError("No text provided in input data")
         
         # Extract other parameters, prioritizing direct fields over config
-        model = input_data.get("model") or input_data.get("config", {}).get("model", "gpt-3.5-turbo")
+        model = input_data.get("model") or input_data.get("config", {}).get("model")
         card_type = input_data.get("cardType") or input_data.get("config", {}).get("cardType", "qa")
         num_cards = input_data.get("numCards") or input_data.get("config", {}).get("numCards", 10)
+        
+        # Get default provider model if none specified
+        if not model:
+            # Check if a provider preference was specified
+            provider = input_data.get("config", {}).get("provider", "openai")
+            if provider == "anthropic":
+                model = settings.DEFAULT_ANTHROPIC_MODEL
+            else:
+                model = settings.DEFAULT_OPENAI_MODEL
         
         # Ensure num_cards is within reasonable limits
         num_cards = max(1, min(int(num_cards), 50))
@@ -90,6 +100,9 @@ async def trigger_generate_cards(request: GenerateCardsRequest, background_tasks
         request.jobId,
         {
             "text": request.text,
+            "model": request.model,
+            "cardType": request.cardType,
+            "numCards": request.numCards,
             "config": request.config
         }
     )
@@ -97,4 +110,29 @@ async def trigger_generate_cards(request: GenerateCardsRequest, background_tasks
     return {
         "message": "Card generation request received",
         "jobId": request.jobId
+    }
+
+@router.get("/available-models")
+async def get_available_models():
+    """Get information about available AI models."""
+    # Return a list of models and their information
+    model_info = {}
+    
+    for model_name, model_data in settings.AI_MODELS.items():
+        model_info[model_name] = {
+            "provider": model_data["provider"],
+            "description": model_data["description"],
+            "maxInputTokens": model_data["max_input_tokens"],
+            "maxOutputTokens": model_data["max_output_tokens"],
+            "isDefault": (
+                model_name == settings.DEFAULT_OPENAI_MODEL and model_data["provider"] == "openai"
+            ) or (
+                model_name == settings.DEFAULT_ANTHROPIC_MODEL and model_data["provider"] == "anthropic"
+            )
+        }
+    
+    return {
+        "models": model_info,
+        "defaultOpenAI": settings.DEFAULT_OPENAI_MODEL,
+        "defaultAnthropic": settings.DEFAULT_ANTHROPIC_MODEL
     }

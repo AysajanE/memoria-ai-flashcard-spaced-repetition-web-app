@@ -1,5 +1,5 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import List
+from typing import List, Dict, Any
 
 
 class Settings(BaseSettings):
@@ -20,36 +20,100 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = ""
     ANTHROPIC_API_KEY: str = ""
     
-    # AI Model Names
-    OPENAI_MODEL_NAME: str = "gpt-3.5-turbo"
-    ANTHROPIC_MODEL_NAME: str = "claude-3-haiku-20240307"
+    # AI Model Configuration
+    # Default models to use
+    DEFAULT_OPENAI_MODEL: str = "gpt-4o-mini"
+    DEFAULT_ANTHROPIC_MODEL: str = "claude-haiku-3-5-latest"
+    
+    # All available models
+    AI_MODELS: Dict[str, Dict[str, Any]] = {
+        # OpenAI models
+        "gpt-4o-mini": {
+            "provider": "openai",
+            "max_input_tokens": 128000,
+            "max_output_tokens": 4096,
+            "description": "Efficient, cost-effective OpenAI model with good performance"
+        },
+        "gpt-3.5-turbo": {
+            "provider": "openai",
+            "max_input_tokens": 16385,
+            "max_output_tokens": 4096,
+            "description": "Legacy model, prefer gpt-4o-mini for better performance"
+        },
+        # Anthropic models
+        "claude-haiku-3-5-latest": {
+            "provider": "anthropic",
+            "max_input_tokens": 200000,
+            "max_output_tokens": 4096,
+            "description": "Fast, efficient Anthropic model suitable for most tasks"
+        }
+    }
     
     # Token Limits
     MAX_INPUT_TOKENS: int = 4000
     MAX_OUTPUT_TOKENS: int = 2000
     
     # Default System Prompt
-    DEFAULT_SYSTEM_PROMPT: str = """You are an expert study assistant. Your task is to generate high-quality flashcards from the provided text. Create {num_cards} flashcards, focusing on {card_type} type cards.
-
-Output Format Rules:
-1. Return ONLY a valid JSON list (array) of flashcard objects.
-2. Each object must have a "front" key (the question or cloze statement) and a "back" key (the answer).
-3. For QA cards, add a "type": "qa" key-value pair.
-4. For Cloze cards, add a "type": "cloze" key-value pair. Use the format "{{c1::word to hide}}" for cloze deletions in the "front" field. The "back" field should contain the full sentence or context, possibly highlighting the hidden word.
-5. Generate exactly {num_cards} cards or fewer if the content is limited, covering the key concepts in the text.
-6. Ensure questions are clear and answers are concise and accurate based *only* on the provided text.
-
-Example QA: {"front": "What is the primary function of the mitochondria?", "back": "To generate most of the cell's supply of adenosine triphosphate (ATP), used as a source of chemical energy.", "type": "qa"}
-Example Cloze: {"front": "The Treaty of Versailles officially ended {{c1::World War I}}.", "back": "The Treaty of Versailles officially ended World War I.", "type": "cloze"}
-
-Generate the JSON list now based on the user's text."""
+    DEFAULT_SYSTEM_PROMPT: str = """
+    You are a helpful AI assistant that creates educational flashcards.
     
-    model_config = SettingsConfigDict(
-        env_file='.env.local',
-        extra='ignore',
-        case_sensitive=True
-    )
+    Your task is to convert the provided text into a set of {num_cards} high-quality {card_type} flashcards.
+    
+    For "qa" cards, produce a JSON array with objects containing "front" (question) and "back" (answer) fields.
+    For "cloze" cards, create "front" with [...] for the deleted term and "back" with just the deleted term.
+    
+    Make each card concise, focused on one concept, and educational. Prioritize key concepts.
+    
+    Format your response as valid JSON:
+    {
+      "cards": [
+        {"front": "Question text?", "back": "Answer text"},
+        ...
+      ]
+    }
+    """
+    
+    class Config:
+        env_file = ".env.local"
+        env_file_encoding = "utf-8"
 
-
-# Create a global settings instance
+# Create a singleton instance
 settings = Settings()
+
+# Helper function to get model configuration
+def get_model_config(model_name: str = None) -> Dict[str, Any]:
+    """Get configuration for a specific model or default model based on provider.
+    
+    Args:
+        model_name: Name of the model to get config for. If None, uses default OpenAI model.
+        
+    Returns:
+        Dict containing model configuration
+    """
+    if not model_name:
+        model_name = settings.DEFAULT_OPENAI_MODEL
+        
+    # If model exists in our configuration, return its config
+    if model_name in settings.AI_MODELS:
+        return {
+            "name": model_name,
+            **settings.AI_MODELS[model_name]
+        }
+    
+    # If model doesn't exist, determine provider based on model name
+    if model_name.startswith("gpt-"):
+        provider = "openai"
+    elif model_name.startswith("claude-"):
+        provider = "anthropic"
+    else:
+        # Default to OpenAI if we can't determine
+        provider = "openai"
+        
+    # Return a basic config with some safe defaults
+    return {
+        "name": model_name,
+        "provider": provider,
+        "max_input_tokens": settings.MAX_INPUT_TOKENS,
+        "max_output_tokens": settings.MAX_OUTPUT_TOKENS,
+        "description": "Custom model"
+    }

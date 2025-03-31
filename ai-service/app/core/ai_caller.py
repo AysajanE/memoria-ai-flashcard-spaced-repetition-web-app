@@ -17,7 +17,7 @@ from openai import (
 # Add Anthropic import
 import anthropic
 
-from app.config import settings
+from app.config import settings, get_model_config
 
 logger = logging.getLogger(__name__)
 
@@ -38,54 +38,48 @@ class AIError(Exception):
         if suggested_action:
             self.suggested_action = suggested_action
 
+# Error subclasses
 class TokenLimitError(AIError):
-    """Raised when input exceeds model's token limit."""
-    category = "token_limit"
+    """Exception for token limit exceeded errors."""
+    category = "token_limit_error"
     retryable = False
-    code = "TOKEN_EXCEEDED"
+    code = "TOKEN_LIMIT_EXCEEDED"
     suggested_action = "Reduce the input text length or split it into smaller chunks."
 
+class AIServiceError(AIError):
+    """Exception for AI service errors."""
+    category = "service_error"
+    retryable = True
+    code = "AI_SERVICE_ERROR"
+    suggested_action = "Try again later or contact support."
+
 class AuthError(AIError):
-    """Raised for authentication-related errors."""
+    """Exception for authentication errors."""
     category = "auth_error"
     retryable = False
-    code = "AUTH_FAILED"
-    suggested_action = "Check AI service authentication credentials."
+    code = "AUTH_ERROR"
+    suggested_action = "Check API key configuration."
 
 class RateLimitError(AIError):
-    """Raised when AI service rate limits are hit."""
-    category = "rate_limit"
+    """Exception for rate limit errors."""
+    category = "rate_limit_error"
     retryable = True
     code = "RATE_LIMIT_EXCEEDED"
-    suggested_action = "Try again later or reduce the frequency of requests."
+    suggested_action = "Try again later with exponential backoff."
 
 class NetworkError(AIError):
-    """Raised for network/connectivity issues."""
+    """Exception for network errors."""
     category = "network_error"
     retryable = True
-    code = "NETWORK_FAILURE"
-    suggested_action = "Check network connectivity and try again."
+    code = "NETWORK_ERROR"
+    suggested_action = "Check your network connection and try again."
 
 class AIModelError(AIError):
-    """Raised for AI model-specific errors."""
-    category = "ai_model_error"
+    """Exception for model-specific errors."""
+    category = "model_error"
     retryable = False
     code = "MODEL_ERROR"
-    suggested_action = "Try with a different model or adjust generation parameters."
-
-class ParseError(AIError):
-    """Raised for errors parsing AI responses."""
-    category = "parse_error"
-    retryable = False
-    code = "INVALID_RESPONSE"
-    suggested_action = "Contact support if the issue persists."
-
-class AIServiceError(AIError):
-    """Raised for general AI service errors."""
-    category = "internal_error"
-    retryable = False
-    code = "SERVICE_ERROR"
-    suggested_action = "Try again or contact support if the issue persists."
+    suggested_action = "Try a different model or adjust parameters."
 
 # Initialize OpenAI client
 try:
@@ -103,8 +97,8 @@ except Exception as e:
 
 async def generate_cards_with_ai(
     text: str,
-    model_name: str,
-    system_prompt: str,
+    model_name: str = None,
+    system_prompt: str = None,
     card_type: str = "qa",
     num_cards: int = 10,
     max_retries: int = 3,
@@ -115,8 +109,8 @@ async def generate_cards_with_ai(
     
     Args:
         text: The input text to generate cards from
-        model_name: The name of the model to use
-        system_prompt: The system prompt to guide card generation
+        model_name: The name of the model to use (if None, uses default from config)
+        system_prompt: The system prompt to guide card generation (if None, uses default)
         card_type: Type of flashcards to generate ("qa" or "cloze")
         num_cards: Number of flashcards to generate
         max_retries: Maximum number of retry attempts
@@ -130,6 +124,15 @@ async def generate_cards_with_ai(
         AIServiceError: For other AI service errors
     """
     try:
+        # Get model configuration
+        model_config = get_model_config(model_name)
+        model_name = model_config["name"]
+        provider = model_config["provider"]
+        
+        # Use default system prompt if not provided
+        if system_prompt is None:
+            system_prompt = settings.DEFAULT_SYSTEM_PROMPT
+            
         # Adjust system prompt to include card type and count
         adjusted_prompt = system_prompt
         if "{card_type}" in system_prompt:
@@ -137,10 +140,8 @@ async def generate_cards_with_ai(
         if "{num_cards}" in system_prompt:
             adjusted_prompt = adjusted_prompt.replace("{num_cards}", str(num_cards))
             
-        # Check if model_name is an Anthropic model
-        is_anthropic_model = model_name.startswith("claude-")
-        
-        if is_anthropic_model:
+        # Choose the appropriate generation function based on the provider
+        if provider == "anthropic":
             return await _generate_with_anthropic(
                 text=text,
                 model_name=model_name,
@@ -148,7 +149,7 @@ async def generate_cards_with_ai(
                 max_retries=max_retries,
                 retry_delay=retry_delay
             )
-        else:
+        else:  # Default to OpenAI
             return await _generate_with_openai(
                 text=text,
                 model_name=model_name,
@@ -236,31 +237,30 @@ async def _generate_with_openai(
                 context={"original_error": str(e), "attempts": max_retries}
             )
             
-        except APITimeoutError as e:
+        except (APITimeoutError, APIConnectionError) as e:
             if attempt < max_retries - 1:
-                logger.warning(f"API timeout, retrying in {retry_delay}s...")
+                logger.warning(f"Network error, retrying in {retry_delay}s...")
                 await asyncio.sleep(retry_delay)
                 continue
-            
+                
             raise NetworkError(
-                f"API timeout after {max_retries} attempts",
-                code="TIMEOUT",
-                context={"original_error": str(e), "attempts": max_retries}
-            )
-            
-        except APIConnectionError as e:
-            if attempt < max_retries - 1:
-                logger.warning(f"API connection error, retrying in {retry_delay}s...")
-                await asyncio.sleep(retry_delay)
-                continue
-            
-            raise NetworkError(
-                f"API connection error after {max_retries} attempts",
+                f"Network error communicating with AI service: {str(e)}",
                 context={"original_error": str(e), "attempts": max_retries}
             )
             
         except APIError as e:
-            logger.error(f"Unexpected OpenAI API error: {str(e)}")
+            if e.status_code >= 500 and attempt < max_retries - 1:
+                logger.warning(f"Server error, retrying in {retry_delay}s...")
+                await asyncio.sleep(retry_delay)
+                continue
+                
+            raise AIServiceError(
+                f"Unexpected AI service error: {str(e)}",
+                context={"original_error": str(e), "status_code": e.status_code}
+            )
+            
+        except Exception as e:
+            logger.error(f"Unexpected error with OpenAI API: {str(e)}")
             raise AIServiceError(
                 f"Unexpected AI service error: {str(e)}",
                 context={"original_error": str(e)}
