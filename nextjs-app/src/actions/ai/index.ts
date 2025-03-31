@@ -208,12 +208,17 @@ export async function reviewCardsAction(
       // Insert flashcards
       await tx.insert(flashcards).values(preparedFlashcards);
 
-      // Update job status to completed
+      // Update job status to note that the cards have been saved to a deck
       await tx
         .update(processingJobs)
         .set({
-          status: "completed",
           updatedAt: new Date(),
+          status: "completed",
+          resultMetadata: { 
+            ...job.resultMetadata,
+            savedToDeck: finalDeckId,
+            savedAt: new Date().toISOString()
+          },
         })
         .where(eq(processingJobs.id, validatedData.jobId));
 

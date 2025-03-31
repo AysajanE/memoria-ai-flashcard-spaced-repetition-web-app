@@ -3,7 +3,7 @@
 import { auth } from "@clerk/nextjs";
 import { db } from "@/db";
 import { decks } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, count } from "drizzle-orm";
 
 // Add imports for flashcards
 import { flashcards, processingJobs } from "@/db/schema";
@@ -32,6 +32,49 @@ export async function getDecksAction() {
     };
   } catch (error) {
     console.error("Error fetching decks:", error);
+    return {
+      isSuccess: false,
+      message: "Failed to fetch decks",
+      error: { server: ["An unexpected error occurred"] }
+    };
+  }
+}
+
+// Get decks with card counts
+export async function getDecksWithCardCountsAction() {
+  try {
+    const { userId } = await auth();
+    
+    if (!userId) {
+      return {
+        isSuccess: false,
+        message: "Not authenticated",
+        error: { auth: ["You must be signed in to view decks"] }
+      };
+    }
+
+    // Query decks with card counts
+    const userDecks = await db
+      .select({
+        id: decks.id,
+        name: decks.name,
+        userId: decks.userId,
+        createdAt: decks.createdAt,
+        updatedAt: decks.updatedAt,
+        cardCount: count(flashcards.id)
+      })
+      .from(decks)
+      .leftJoin(flashcards, eq(flashcards.deckId, decks.id))
+      .where(eq(decks.userId, userId))
+      .groupBy(decks.id)
+      .orderBy(decks.updatedAt);
+
+    return {
+      isSuccess: true,
+      data: userDecks
+    };
+  } catch (error) {
+    console.error("Error fetching decks with card counts:", error);
     return {
       isSuccess: false,
       message: "Failed to fetch decks",
@@ -110,7 +153,7 @@ export async function createDeckWithFlashcardsAction(input: z.infer<typeof creat
 }
 
 // Function to save flashcards from a completed job
-export async function saveJobFlashcardsAction(jobId: string, deckName: string) {
+export async function saveJobFlashcardsAction(jobId: string, deckNameOrId: string, isExistingDeck: boolean = false) {
   try {
     const { userId } = await auth();
     
@@ -166,15 +209,63 @@ export async function saveJobFlashcardsAction(jobId: string, deckName: string) {
       };
     }
 
-    // Create a new deck with the cards
-    return await createDeckWithFlashcardsAction({
-      name: deckName || "Untitled Deck",
-      cards: cards.map(card => ({
-        front: card.front,
-        back: card.back,
-        cardType: (card.type === "cloze" ? "cloze" : "qa") as "qa" | "cloze"
-      }))
-    });
+    // Handle adding to existing deck vs creating new deck
+    if (isExistingDeck) {
+      // Verify the deck exists and belongs to the user
+      const existingDeck = await db.query.decks.findFirst({
+        where: eq(decks.id, deckNameOrId)
+      });
+
+      if (!existingDeck) {
+        return {
+          isSuccess: false,
+          message: "Deck not found",
+          error: { deck: ["The selected deck could not be found"] }
+        };
+      }
+
+      if (existingDeck.userId !== userId) {
+        return {
+          isSuccess: false,
+          message: "Unauthorized",
+          error: { auth: ["You do not have permission to access this deck"] }
+        };
+      }
+
+      // Add cards to existing deck
+      await db.insert(flashcards).values(
+        cards.map(card => ({
+          deckId: existingDeck.id,
+          userId,
+          front: card.front,
+          back: card.back,
+          cardType: (card.type === "cloze" ? "cloze" : "qa") as "qa" | "cloze"
+        }))
+      );
+
+      // Update job to record that cards were saved
+      await db.update(processingJobs)
+        .set({
+          updatedAt: new Date()
+        })
+        .where(eq(processingJobs.id, jobId));
+
+      return {
+        isSuccess: true,
+        message: "Flashcards added to existing deck successfully",
+        data: existingDeck
+      };
+    } else {
+      // Create a new deck with the cards
+      return await createDeckWithFlashcardsAction({
+        name: deckNameOrId || "Untitled Deck",
+        cards: cards.map(card => ({
+          front: card.front,
+          back: card.back,
+          cardType: (card.type === "cloze" ? "cloze" : "qa") as "qa" | "cloze"
+        }))
+      });
+    }
   } catch (error) {
     console.error("Error saving job flashcards to deck:", error);
     return {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/shared/page-header";
@@ -16,8 +16,16 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { saveJobFlashcardsAction } from "@/actions/db/decks";
+import { saveJobFlashcardsAction, getDecksAction } from "@/actions/db/decks";
 import { ChangeEvent } from "react";
+import { Loader2 } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 export default function JobStatusPage({ params }: { params: { jobId: string } }) {
   const router = useRouter();
@@ -27,6 +35,11 @@ export default function JobStatusPage({ params }: { params: { jobId: string } })
   const [error, setError] = useState<string | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [deckName, setDeckName] = useState("");
+  const [isPending, startTransition] = useTransition();
+  const [decks, setDecks] = useState<any[]>([]);
+  const [selectedDeckId, setSelectedDeckId] = useState<string>("");
+  const [isLoadingDecks, setIsLoadingDecks] = useState(false);
+  const [dialogError, setDialogError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
@@ -68,27 +81,64 @@ export default function JobStatusPage({ params }: { params: { jobId: string } })
     return () => clearInterval(interval);
   }, [jobId, status]);
 
+  useEffect(() => {
+    if (isDialogOpen) {
+      setIsLoadingDecks(true);
+      setDialogError(null);
+      
+      getDecksAction()
+        .then((result) => {
+          if (result.isSuccess && result.data) {
+            setDecks(result.data);
+          } else {
+            setDialogError(result.message || "Failed to fetch decks");
+          }
+        })
+        .catch((err) => {
+          console.error("Error fetching decks:", err);
+          setDialogError("Failed to fetch decks");
+        })
+        .finally(() => {
+          setIsLoadingDecks(false);
+        });
+    }
+  }, [isDialogOpen]);
+
   const handleSaveFlashcards = async () => {
-    if (!deckName.trim()) {
-      toast.error("Please enter a deck name");
+    if (!selectedDeckId && !deckName.trim()) {
+      setDialogError("Please select an existing deck or create a new one");
       return;
     }
 
+    if (deckName && deckName.length < 3) {
+      setDialogError("Deck name must be at least 3 characters long");
+      return;
+    }
+
+    setDialogError(null);
     setIsSaving(true);
+
     try {
-      const response = await saveJobFlashcardsAction(jobId, deckName);
-      
-      if (response.isSuccess) {
-        toast.success("Flashcards saved to deck successfully!");
-        setIsDialogOpen(false);
-        router.push("/decks");
-      } else {
-        toast.error(response.message || "Failed to save flashcards to deck");
-      }
+      startTransition(async () => {
+        const response = selectedDeckId 
+          ? await saveJobFlashcardsAction(jobId, selectedDeckId, true) 
+          : await saveJobFlashcardsAction(jobId, deckName);
+        
+        if (response.isSuccess) {
+          toast.success("Flashcards saved successfully!");
+          setIsDialogOpen(false);
+          // Navigate to the appropriate page
+          router.push(selectedDeckId ? `/study/${selectedDeckId}` : "/decks");
+        } else {
+          toast.error(response.message || "Failed to save flashcards");
+          setDialogError(response.message || "Failed to save flashcards");
+        }
+        
+        setIsSaving(false);
+      });
     } catch (err) {
       console.error("Error saving flashcards:", err);
       toast.error("An unexpected error occurred");
-    } finally {
       setIsSaving(false);
     }
   };
@@ -173,36 +223,120 @@ export default function JobStatusPage({ params }: { params: { jobId: string } })
         </div>
       </div>
 
-      {/* Deck Creation Dialog */}
+      {/* Enhanced Deck Creation/Selection Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="sm:max-w-[425px]">
+        <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
-            <DialogTitle>Save Flashcards</DialogTitle>
+            <DialogTitle className="text-2xl font-bold flex items-center gap-2">
+              Save Flashcards
+            </DialogTitle>
             <DialogDescription>
-              Create a new deck to save your generated flashcards.
+              Select an existing deck or create a new one to save your flashcards.
             </DialogDescription>
           </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="deckName" className="text-right">
-                Deck Name
+          
+          <div className="grid gap-6 py-4">
+            {/* Existing Decks Selection */}
+            <div className="space-y-2">
+              <Label className="text-base font-medium">Choose Existing Deck</Label>
+              <Select
+                value={selectedDeckId}
+                onValueChange={(value) => {
+                  setSelectedDeckId(value);
+                  setDeckName("");
+                  setDialogError(null);
+                }}
+                disabled={isLoadingDecks || isSaving}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder={
+                    isLoadingDecks
+                      ? "Loading your decks..."
+                      : "Select an existing deck..."
+                  } />
+                </SelectTrigger>
+                <SelectContent>
+                  {isLoadingDecks ? (
+                    <div className="flex items-center justify-center p-4">
+                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                      <span>Loading decks...</span>
+                    </div>
+                  ) : decks.length > 0 ? (
+                    decks.map((deck) => (
+                      <SelectItem key={deck.id} value={deck.id}>
+                        {deck.name}
+                      </SelectItem>
+                    ))
+                  ) : (
+                    <div className="p-2 text-center text-sm text-muted-foreground">
+                      No decks found. Create a new one below.
+                    </div>
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
+            
+            {/* Or divider */}
+            <div className="relative">
+              <div className="absolute inset-0 flex items-center">
+                <span className="w-full border-t border-border" />
+              </div>
+              <div className="relative flex justify-center text-xs">
+                <span className="bg-background px-2 text-muted-foreground">OR</span>
+              </div>
+            </div>
+            
+            {/* New Deck Creation */}
+            <div className="space-y-2">
+              <Label htmlFor="deckName" className="text-base font-medium">
+                Create New Deck
               </Label>
               <Input
                 id="deckName"
                 value={deckName}
-                onChange={(e: ChangeEvent<HTMLInputElement>) => setDeckName(e.target.value)}
-                className="col-span-3"
-                placeholder="e.g. Biology 101, Spanish Vocab"
+                onChange={(e: ChangeEvent<HTMLInputElement>) => {
+                  setDeckName(e.target.value);
+                  setSelectedDeckId("");
+                  setDialogError(null);
+                }}
+                className="w-full"
+                placeholder="Enter new deck name..."
+                disabled={isSaving}
               />
+              {deckName && (
+                <p className="text-sm text-muted-foreground mt-1">
+                  New deck "{deckName}" will be created
+                </p>
+              )}
             </div>
+            
+            {dialogError && (
+              <div className="bg-destructive/10 text-destructive p-3 rounded-md text-sm">
+                {dialogError}
+              </div>
+            )}
           </div>
+          
           <DialogFooter>
             <Button 
-              type="submit" 
-              onClick={handleSaveFlashcards}
+              variant="outline" 
+              onClick={() => setIsDialogOpen(false)}
               disabled={isSaving}
             >
-              {isSaving ? "Saving..." : "Save Flashcards"}
+              Cancel
+            </Button>
+            <Button 
+              onClick={handleSaveFlashcards}
+              disabled={isSaving || (!selectedDeckId && !deckName)}
+            >
+              {isSaving ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  Saving...
+                </>
+              ) : (
+                "Save Flashcards"
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>

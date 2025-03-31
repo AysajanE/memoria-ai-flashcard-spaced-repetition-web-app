@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import { getDecksAction } from "@/actions/db/decks";
+import { getDecksWithCardCountsAction } from "@/actions/db/decks";
 
 export default function DecksPage() {
   const [decks, setDecks] = useState<any[]>([]);
@@ -17,7 +17,7 @@ export default function DecksPage() {
     const loadDecks = async () => {
       setIsLoading(true);
       try {
-        const result = await getDecksAction();
+        const result = await getDecksWithCardCountsAction();
         
         if (result.isSuccess) {
           setDecks(result.data || []);
@@ -86,7 +86,6 @@ export default function DecksPage() {
                 <CardContent>
                   <div className="flex justify-between items-center mb-4">
                     <span className="text-sm text-muted-foreground">
-                      {/* Add actual card count if available */}
                       {deck.cardCount || 0} cards
                     </span>
                     <span className="text-sm text-muted-foreground">
