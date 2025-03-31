@@ -44,7 +44,7 @@ export function SiteHeader() {
         <div className="flex h-16 items-center justify-between">
           {/* Logo and desktop navigation */}
           <div className="flex items-center">
-            <Link href="/" className="flex items-center space-x-2">
+            <Link href="/landing" className="flex items-center space-x-2">
               <div className="relative w-8 h-8 overflow-hidden">
                 <div className="absolute inset-0 rounded-full bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500"></div>
                 <div className="absolute inset-[2px] rounded-full bg-white dark:bg-gray-900 flex items-center justify-center">
