@@ -8,6 +8,22 @@ import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { getDecksWithCardCountsAction } from "@/actions/db/decks";
 
+/**
+ * @file page.tsx (DecksPage)
+ * @description
+ *  Client-side page to list the user's decks, including how many cards each contains.
+ *
+ * Key functionalities:
+ *  - On mount, fetches the deck list with card counts from `getDecksWithCardCountsAction`.
+ *  - Displays loading and error states as needed.
+ *  - Provides a button to create new decks.
+ *  - Each deck shows how many cards are in it, plus a study button that links to /study/[deckId].
+ *
+ * @notes
+ *  - This code references the new server action introduced in Option B, so you must ensure
+ *    `getDecksWithCardCountsAction` exists in `@/actions/db/decks`.
+ */
+
 export default function DecksPage() {
   const [decks, setDecks] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -81,7 +97,9 @@ export default function DecksPage() {
               <Card className="hover:bg-accent/50 h-full transition-colors">
                 <CardHeader>
                   <CardTitle>{deck.name}</CardTitle>
-                  <p className="text-sm text-muted-foreground">{deck.description || ""}</p>
+                  <p className="text-sm text-muted-foreground">
+                    {deck.description || ""}
+                  </p>
                 </CardHeader>
                 <CardContent>
                   <div className="flex justify-between items-center mb-4">

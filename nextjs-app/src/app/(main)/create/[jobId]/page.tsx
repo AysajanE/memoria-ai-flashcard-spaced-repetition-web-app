@@ -1,291 +1,526 @@
+/**
+ * @file page.tsx (JobStatusPage)
+ * @description
+ *  This page displays the AI processing job status and, once completed,
+ *  shows the generated flashcards. The user can approve them and assign 
+ *  them to an existing or new deck. We rename and call "reviewCardsAction" 
+ *  to finalize saving to the DB.
+ *
+ * @dependencies
+ *  - Next.js (useRouter, useParams)
+ *  - React (useState, useEffect, useTransition)
+ *  - Sonner (toast)
+ *  - Shadcn/ui (Dialog, Button, etc.)
+ *  - Our newly named "reviewCardsAction" from `db/decks.ts`
+ *
+ * @notes
+ *  - This completes the "review & approve" step in the plan: user sees generated 
+ *    cards, picks a deck or creates a new deck (in ApproveDialog), and we call 
+ *    "reviewCardsAction" to save them. 
+ *  - We poll /api/job-status/[jobId] for job status transitions and only show the 
+ *    final result once it's "completed" or "failed."
+ */
+
 "use client";
 
-import { useState, useEffect, useTransition } from "react";
-import { useParams, useRouter } from "next/navigation";
-import { Card } from "@/components/ui/card";
+import { useEffect, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/shared/page-header";
 import { Loader2 } from "lucide-react";
-import { JobStatus, FlashcardData } from "@/types";
-import { cn } from "@/lib/utils";
-import { ApproveDialog } from "@/components/features/create/approve-dialog";
-import { reviewCardsAction } from "@/actions/ai";
 import { toast } from "sonner";
+import { reviewCardsAction, getDecksAction } from "@/actions/db/decks";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { ChangeEvent } from "react";
 
-export default function JobStatusPage() {
-  const params = useParams();
+/**
+ * Minimal type for the data we receive from /api/job-status/[jobId].
+ */
+interface JobData {
+  id: string;
+  status: "pending" | "processing" | "completed" | "failed";
+  resultPayload?: {
+    cards?: Array<{
+      front: string;
+      back: string;
+      type?: "qa" | "cloze";
+    }>;
+  };
+  errorMessage?: string;
+}
+
+/**
+ * Our main component for the "review & approve" step.
+ */
+export default function JobStatusPage({ params }: { params: { jobId: string } }) {
   const router = useRouter();
-  const [isPending, startTransition] = useTransition();
-  const jobId = params.jobId as string;
-  const [job, setJob] = useState<{
-    status: JobStatus;
-    resultPayload?: { cards: FlashcardData[] } | null;
-    errorMessage?: string | null;
-  } | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [isApproveDialogOpen, setIsApproveDialogOpen] = useState(false);
-  const [isPolling, setIsPolling] = useState(true);
+  const { jobId } = params;
 
+  const [jobState, setJobState] = useState<JobData | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+
+  // State for decks, user selection, and deck creation
+  const [decks, setDecks] = useState<any[]>([]);
+  const [selectedDeckId, setSelectedDeckId] = useState<string>("");
+  const [deckName, setDeckName] = useState("");
+  const [dialogError, setDialogError] = useState<string | null>(null);
+
+  // Tracks if we are currently saving flashcards
+  const [isSaving, setIsSaving] = useState(false);
+
+  // Let React manage transitions
+  const [isPending, startTransition] = useTransition();
+
+  // Polling for job status
   useEffect(() => {
-    const fetchJobStatus = async () => {
+    let intervalId: NodeJS.Timer | null = null;
+
+    async function fetchJobStatus() {
       try {
-        const response = await fetch(`/api/job-status/${jobId}`);
-        if (!response.ok) {
+        const res = await fetch(`/api/job-status/${jobId}`, {
+          method: "GET",
+        });
+        if (!res.ok) {
           throw new Error("Failed to fetch job status");
         }
-        const data = await response.json();
-        setJob(data);
+        const data: JobData = await res.json();
+        setJobState(data);
 
-        // Stop polling if job is completed or failed
         if (data.status === "completed" || data.status === "failed") {
-          setIsPolling(false);
+          if (intervalId) clearInterval(intervalId);
         }
       } catch (err) {
-        setError(err instanceof Error ? err.message : "An error occurred");
-        setIsPolling(false);
+        console.error("Error fetching job status:", err);
+        setError(err instanceof Error ? err.message : "An unexpected error occurred");
+        if (intervalId) clearInterval(intervalId);
       }
-    };
+    }
 
     // Initial fetch
     fetchJobStatus();
 
-    // Poll every 5 seconds if job is pending or processing
-    const interval = setInterval(() => {
-      if (isPolling) {
+    // Poll every 3s while pending or processing
+    intervalId = setInterval(() => {
+      if (
+        jobState?.status !== "completed" &&
+        jobState?.status !== "failed" &&
+        !error
+      ) {
         fetchJobStatus();
+      } else {
+        if (intervalId) clearInterval(intervalId);
       }
-    }, 5000);
+    }, 3000);
 
-    return () => clearInterval(interval);
-  }, [jobId, isPolling]);
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [jobId, jobState?.status, error]);
 
-  const handleApproveSubmit = async (targetDeck: {
-    id?: string;
-    name?: string;
-  }) => {
-    if (!job?.resultPayload?.cards) {
-      toast.error("No cards to approve");
+  /**
+   * Once the user wants to save the flashcards to a deck, we open a dialog.
+   * We'll fetch the user's existing decks if not already loaded.
+   */
+  useEffect(() => {
+    if (isDialogOpen) {
+      setDialogError(null);
+      setIsLoadingDecks(true);
+
+      getDecksAction()
+        .then((result) => {
+          if (result.isSuccess && result.data) {
+            setDecks(result.data);
+          } else {
+            setDialogError(result.message || "Failed to fetch decks");
+          }
+        })
+        .catch((err) => {
+          console.error("Error fetching decks:", err);
+          setDialogError("Failed to fetch decks");
+        })
+        .finally(() => {
+          setIsLoadingDecks(false);
+        });
+    }
+  }, [isDialogOpen]);
+
+  // Keep track if we are in the middle of loading the deck list
+  const [isLoadingDecks, setIsLoadingDecks] = useState(false);
+
+  /**
+   * This method is triggered when the user clicks the final "Save Flashcards"
+   * inside our ApproveDialog. We either create a new deck or save to an existing deck.
+   */
+  async function handleSaveFlashcards() {
+    if (!jobState?.resultPayload?.cards) {
+      toast.error("No cards to approve or save");
+      return;
+    }
+    if (!selectedDeckId && !deckName.trim()) {
+      setDialogError("Please select an existing deck or create a new one");
+      return;
+    }
+    if (deckName && deckName.length < 3) {
+      setDialogError("Deck name must be at least 3 characters long");
       return;
     }
 
-    startTransition(async () => {
-      const result = await reviewCardsAction(
-        jobId,
-        job.resultPayload.cards,
-        targetDeck
-      );
+    setDialogError(null);
+    setIsSaving(true);
 
-      if (result.isSuccess) {
-        toast.success(result.message);
-        router.push(`/decks/${result.data.deckId}`);
-      } else {
-        toast.error(result.message || "Failed to approve cards");
-      }
-    });
-  };
+    try {
+      startTransition(async () => {
+        const response = selectedDeckId
+          ? await reviewCardsAction(jobId, selectedDeckId, true)
+          : await reviewCardsAction(jobId, deckName);
 
-  if (error) {
-    return (
-      <div className="container max-w-4xl py-8">
-        <Card className="p-6">
-          <div className="flex flex-col items-center justify-center space-y-4">
-            <h1 className="text-destructive text-2xl font-bold">Error</h1>
-            <p className="text-muted-foreground text-center">{error}</p>
-            <Button onClick={() => router.push("/create")}>Try Again</Button>
-          </div>
-        </Card>
-      </div>
-    );
+        if (response.isSuccess) {
+          toast.success("Flashcards saved successfully!");
+          setIsDialogOpen(false);
+          // If we used an existing deckId, go to it. Otherwise, also go to that deck.
+          router.push(`/study/${response.data?.deckId}`);
+        } else {
+          toast.error(response.message || "Failed to save flashcards");
+          setDialogError(response.message || "Failed to save flashcards");
+        }
+        setIsSaving(false);
+      });
+    } catch (err) {
+      console.error("Error saving flashcards:", err);
+      toast.error("An unexpected error occurred");
+      setIsSaving(false);
+    }
   }
 
-  if (!job) {
-    return (
-      <div className="container max-w-4xl py-8">
-        <Card className="p-6">
-          <div className="flex flex-col items-center justify-center space-y-4">
-            <Loader2 className="text-primary h-8 w-8 animate-spin" />
-            <p className="text-muted-foreground">Loading job status...</p>
+  function renderContent() {
+    if (error) {
+      return (
+        <div className="flex flex-col items-center justify-center space-y-4 py-8">
+          <p className="text-destructive text-center">{error}</p>
+          <Button variant="outline" onClick={() => router.push("/create")}>
+            Try Again
+          </Button>
+        </div>
+      );
+    }
+
+    if (!jobState) {
+      return (
+        <div className="flex flex-col items-center justify-center space-y-4 py-8">
+          <Loader2 className="text-primary h-8 w-8 animate-spin" />
+          <p className="text-muted-foreground">Loading job status...</p>
+        </div>
+      );
+    }
+
+    if (jobState.status === "pending" || jobState.status === "processing") {
+      return (
+        <div className="flex flex-col items-center justify-center space-y-4 py-8">
+          <Loader2 className="text-primary h-8 w-8 animate-spin" />
+          <p className="text-muted-foreground">
+            {jobState.status === "pending"
+              ? "Your job is queued and will start soon..."
+              : "Generating cards, please wait..."}
+          </p>
+        </div>
+      );
+    }
+
+    if (jobState.status === "failed") {
+      return (
+        <div className="flex flex-col items-center justify-center space-y-4 py-8">
+          <div className="rounded-full bg-red-100 p-3">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              className="h-8 w-8 text-red-600"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M6.938 4h13.124c1.54 0 2.502 1.667 1.732 3L13.732 20c-.77 1.333-2.694 1.333-3.464 0L3.34 7c-.77-1.333.192-3 1.732-3z" />
+            </svg>
           </div>
-        </Card>
+          <h2 className="text-xl font-bold text-red-600">Generation Failed</h2>
+          <p className="text-center text-muted-foreground">
+            {jobState.errorMessage || "An error occurred while generating your flashcards."}
+          </p>
+          <Button onClick={() => router.push("/create")}>Try Again</Button>
+        </div>
+      );
+    }
+
+    // Status === 'completed'
+    const cards = jobState.resultPayload?.cards || [];
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between bg-gradient-to-br from-indigo-50 to-purple-50 dark:from-indigo-900/30 dark:to-purple-900/30 p-4 rounded-xl border border-indigo-100 dark:border-indigo-800">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-white dark:bg-gray-800 rounded-lg flex items-center justify-center shadow-sm">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                className="h-6 w-6 text-green-600 dark:text-green-400"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <div>
+              <h2 className="text-xl font-semibold">Generation Complete!</h2>
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                {cards.length} flashcards have been generated successfully
+              </p>
+            </div>
+          </div>
+          <Button
+            onClick={() => setIsDialogOpen(true)}
+            disabled={isPending}
+            className="bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white shadow-md hover:shadow-lg transition-all border-0"
+          >
+            {isPending ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Approving...
+              </>
+            ) : (
+              <>
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="h-5 w-5 mr-2"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                Approve & Assign Cards
+              </>
+            )}
+          </Button>
+        </div>
+
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-medium flex items-center gap-2">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                className="h-5 w-5 text-indigo-600 dark:text-indigo-400"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+              </svg>
+              Generated Flashcards
+            </h3>
+            <div className="text-sm text-gray-500 dark:text-gray-400">
+              Review these cards before approving
+            </div>
+          </div>
+
+          <div className="grid gap-4">
+            {cards.map((card, index) => (
+              <div
+                key={index}
+                className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 shadow-sm hover:shadow-md transition-all"
+              >
+                <div className="mb-2">
+                  <h4 className="text-sm font-medium text-muted-foreground mb-1">QUESTION</h4>
+                  <p className="text-lg">{card.front}</p>
+                </div>
+                <div className="pt-3 border-t border-border/50">
+                  <h4 className="text-sm font-medium text-muted-foreground mb-1">ANSWER</h4>
+                  <p className="text-lg">{card.back}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="flex justify-center mt-6">
+            <Button
+              onClick={() => setIsDialogOpen(true)}
+              disabled={isPending}
+              className="bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white shadow-md hover:shadow-lg transition-all border-0 px-6 py-6 text-lg"
+              size="lg"
+            >
+              {isPending ? (
+                <>
+                  <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                  Approving Cards...
+                </>
+              ) : (
+                <>
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="h-6 w-6 mr-2"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                  Approve & Save to Deck
+                </>
+              )}
+            </Button>
+          </div>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="container max-w-4xl py-8">
-      <Card className="p-6">
-        <div className="space-y-6">
-          {/* Status Header */}
-          <div className="flex items-center justify-between">
-            <h1 className="text-2xl font-bold">Job Status</h1>
-            <div className="flex items-center gap-2">
-              <div
-                className={cn(
-                  "h-2 w-2 rounded-full",
-                  job.status === "completed" && "bg-green-500",
-                  job.status === "failed" && "bg-red-500",
-                  (job.status === "pending" || job.status === "processing") &&
-                    "bg-yellow-500"
-                )}
+    <div className="container py-6 space-y-6">
+      <PageHeader
+        heading="Flashcard Generation"
+        description="Your content is being processed into flashcards"
+      />
+
+      <div className="p-6 bg-muted rounded-lg">
+        <h2 className="text-lg font-semibold mb-4">
+          Job Status: {jobState?.status || "Loading..."}
+        </h2>
+        {renderContent()}
+      </div>
+
+      {/* Approve & Save to Deck Dialog */}
+      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-bold flex items-center gap-2">
+              Save Flashcards
+            </DialogTitle>
+            <DialogDescription>
+              Select an existing deck or create a new one to save your flashcards.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-6 py-4">
+            {/* Existing Decks Selection */}
+            <div className="space-y-2">
+              <Label className="text-base font-medium">Choose Existing Deck</Label>
+              <Select
+                value={selectedDeckId}
+                onValueChange={(value) => {
+                  setSelectedDeckId(value);
+                  setDeckName("");
+                  setDialogError(null);
+                }}
+                disabled={isLoadingDecks || isSaving}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue
+                    placeholder={
+                      isLoadingDecks
+                        ? "Loading your decks..."
+                        : "Select an existing deck..."
+                    }
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  {isLoadingDecks ? (
+                    <div className="flex items-center justify-center p-4">
+                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                      <span>Loading decks...</span>
+                    </div>
+                  ) : decks.length > 0 ? (
+                    decks.map((deck) => (
+                      <SelectItem key={deck.id} value={deck.id}>
+                        {deck.name}
+                      </SelectItem>
+                    ))
+                  ) : (
+                    <div className="p-2 text-center text-sm text-muted-foreground">
+                      No decks found. Create a new one below.
+                    </div>
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Or divider */}
+            <div className="relative">
+              <div className="absolute inset-0 flex items-center">
+                <span className="w-full border-t border-border" />
+              </div>
+              <div className="relative flex justify-center text-xs">
+                <span className="bg-background px-2 text-muted-foreground">OR</span>
+              </div>
+            </div>
+
+            {/* New Deck Creation */}
+            <div className="space-y-2">
+              <Label htmlFor="deckName" className="text-base font-medium">
+                Create New Deck
+              </Label>
+              <Input
+                id="deckName"
+                value={deckName}
+                onChange={(e: ChangeEvent<HTMLInputElement>) => {
+                  setDeckName(e.target.value);
+                  setSelectedDeckId("");
+                  setDialogError(null);
+                }}
+                className="w-full"
+                placeholder="Enter new deck name..."
+                disabled={isSaving}
               />
-              <span className="capitalize">{job.status}</span>
-              {(job.status === "pending" || job.status === "processing") && (
-                <Loader2 className="text-primary h-4 w-4 animate-spin" />
+              {deckName && (
+                <p className="text-sm text-muted-foreground mt-1">
+                  New deck &quot;{deckName}&quot; will be created
+                </p>
               )}
             </div>
+
+            {dialogError && (
+              <div className="bg-destructive/10 text-destructive p-3 rounded-md text-sm">
+                {dialogError}
+              </div>
+            )}
           </div>
 
-          {/* Loading State */}
-          {(job.status === "pending" || job.status === "processing") && (
-            <div className="flex flex-col items-center justify-center space-y-4 py-8">
-              <Loader2 className="text-primary h-8 w-8 animate-spin" />
-              <p className="text-muted-foreground">
-                {job.status === "pending"
-                  ? "Your job is queued and will start soon..."
-                  : "Generating cards, please wait..."}
-              </p>
-            </div>
-          )}
-
-          {/* Error State */}
-          {job.status === "failed" && (
-            <div className="flex flex-col items-center justify-center space-y-4 py-8">
-              <div className="rounded-full bg-red-100 p-3">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                </svg>
-              </div>
-              <h2 className="text-xl font-bold text-red-600">Generation Failed</h2>
-              <p className="text-center text-muted-foreground">
-                {job.errorMessage || "An error occurred while generating your flashcards."}
-              </p>
-              <Button onClick={() => router.push("/create")}>Try Again</Button>
-            </div>
-          )}
-
-          {/* Success State */}
-          {job.status === "completed" && job.resultPayload?.cards && (
-            <div className="space-y-6">
-              <div className="flex items-center justify-between bg-gradient-to-br from-indigo-50 to-purple-50 dark:from-indigo-900/30 dark:to-purple-900/30 p-4 rounded-xl border border-indigo-100 dark:border-indigo-800">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-white dark:bg-gray-800 rounded-lg flex items-center justify-center shadow-sm">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-green-600 dark:text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                  </div>
-                  <div>
-                    <h2 className="text-xl font-semibold">Generation Complete!</h2>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">
-                      {job.resultPayload.cards.length} flashcards have been generated successfully
-                    </p>
-                  </div>
-                </div>
-                <Button
-                  onClick={() => setIsApproveDialogOpen(true)}
-                  disabled={isPending}
-                  className="bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white shadow-md hover:shadow-lg transition-all border-0"
-                >
-                  {isPending ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Approving...
-                    </>
-                  ) : (
-                    <>
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                      </svg>
-                      Approve & Assign Cards
-                    </>
-                  )}
-                </Button>
-              </div>
-              
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-lg font-medium flex items-center gap-2">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-indigo-600 dark:text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-                    </svg>
-                    Generated Flashcards
-                  </h3>
-                  <div className="text-sm text-gray-500 dark:text-gray-400">
-                    Review these cards before approving
-                  </div>
-                </div>
-                <div className="grid gap-4">
-                  {job.resultPayload.cards.map((card, index) => (
-                    <Card key={index} className="p-0 overflow-hidden border border-gray-200 dark:border-gray-700 hover:shadow-md transition-all duration-200 animate-fade-in" style={{ animationDelay: `${index * 50}ms` }}>
-                      <div className="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-gray-200 dark:divide-gray-700">
-                        <div className="p-5 bg-white dark:bg-gray-900 relative">
-                          <div className="absolute top-0 left-0 w-full h-1 bg-indigo-500"></div>
-                          <div className="flex items-center mb-3">
-                            <div className="w-8 h-8 bg-indigo-100 dark:bg-indigo-900/50 rounded-lg flex items-center justify-center mr-2">
-                              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-indigo-600 dark:text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                              </svg>
-                            </div>
-                            <h3 className="text-foreground font-medium">Front</h3>
-                          </div>
-                          <p className="text-gray-700 dark:text-gray-300">{card.front}</p>
-                        </div>
-                        
-                        <div className="p-5 bg-gray-50 dark:bg-gray-800 relative">
-                          <div className="absolute top-0 left-0 w-full h-1 bg-purple-500"></div>
-                          <div className="flex items-center mb-3">
-                            <div className="w-8 h-8 bg-purple-100 dark:bg-purple-900/50 rounded-lg flex items-center justify-center mr-2">
-                              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-purple-600 dark:text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                              </svg>
-                            </div>
-                            <h3 className="text-foreground font-medium">Back</h3>
-                          </div>
-                          <p className="text-gray-700 dark:text-gray-300">{card.back}</p>
-                        </div>
-                      </div>
-                      {card.type && (
-                        <div className="px-4 py-2 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 text-xs font-medium text-gray-500 dark:text-gray-400 flex items-center">
-                          <div className={`w-2 h-2 rounded-full mr-2 ${card.type === 'qa' ? 'bg-indigo-500' : 'bg-purple-500'}`}></div>
-                          Type: {card.type === 'qa' ? 'Question & Answer' : 'Cloze Deletion'}
-                        </div>
-                      )}
-                    </Card>
-                  ))}
-                </div>
-                
-                <div className="flex justify-center mt-6">
-                  <Button
-                    onClick={() => setIsApproveDialogOpen(true)}
-                    disabled={isPending}
-                    className="bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white shadow-md hover:shadow-lg transition-all border-0 px-6 py-6 text-lg"
-                    size="lg"
-                  >
-                    {isPending ? (
-                      <>
-                        <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                        Approving Cards...
-                      </>
-                    ) : (
-                      <>
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                        </svg>
-                        Approve & Save to Deck
-                      </>
-                    )}
-                  </Button>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      </Card>
-      
-      {/* Approve dialog */}
-      <ApproveDialog
-        isOpen={isApproveDialogOpen}
-        setIsOpen={setIsApproveDialogOpen}
-        onSubmit={handleApproveSubmit}
-      />
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setIsDialogOpen(false)}
+              disabled={isSaving}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSaveFlashcards}
+              disabled={isSaving || (!selectedDeckId && !deckName)}
+            >
+              {isSaving ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  Saving...
+                </>
+              ) : (
+                "Save Flashcards"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
