@@ -8,8 +8,8 @@
  *
  * Key Functions:
  *  - submitAiJobAction: Orchestrates creation of a processing job, calls the AI service asynchronously.
- *  - getJobStatusAction: Fetches current job status/results from the database.
  *  - listPendingJobsAction: Debug utility to list all pending jobs for the logged-in user.
+ *  - (Removed) getJobStatusAction: Previously duplicated the /api/job-status/[jobId] route, so we removed it.
  *
  * @dependencies
  *  - Drizzle ORM (db, processingJobs schema, users schema)
@@ -17,8 +17,8 @@
  *  - AI service client (triggerCardGeneration from "@/lib/ai-client")
  *
  * @notes
- *  - All placeholder logic referencing "analyzeTopic", "generateFlashcardsForTopic", or "processTextWithAI"
- *    has been removed, as real AI logic is now in the Python microservice.
+ *  - The placeholder logic referencing "analyzeTopic", etc., is removed; real logic is in the Python microservice.
+ *  - We unify job status polling with the /api/job-status/[jobId] route, so we removed getJobStatusAction.
  *  - This file returns Promise<ActionState<TData>> from each server action, including error handling.
  */
 
@@ -28,14 +28,14 @@ import { auth } from "@clerk/nextjs";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { db } from "@/db";
-import { processingJobs, users } from "@/db/schema";
+import { processingJobs } from "@/db/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { triggerCardGeneration } from "@/lib/ai-client";
 import type { ActionState } from "@/types";
 
 /**
  * The input validation schema for job submission.
- * - jobType: might be "summarize" or "generate-prompts" in some usage
+ * - jobType: might be "summarize" or "generate-prompts" or left for future use
  * - inputPayload: the user-submitted text or config
  * - documentId: optional reference for a stored file
  */
@@ -79,7 +79,8 @@ export async function submitAiJobAction(
       };
     }
 
-    const { jobType = "summarize", inputPayload, documentId } = validatedInput.data;
+    const { jobType = "summarize", inputPayload, documentId } =
+      validatedInput.data;
     const userInputText = inputPayload.text;
 
     // Create a processing job record in DB
@@ -112,20 +113,16 @@ export async function submitAiJobAction(
       await triggerCardGeneration({
         jobId: jobRecord.id,
         text: userInputText,
-        // Additional model or cardType fields can be added if needed
       });
 
       return {
         isSuccess: true,
-        data: { 
-          jobId: jobRecord.id,
-          inputText: userInputText
-        },
+        data: { jobId: jobRecord.id, inputText: userInputText },
         message: "Job creation succeeded. AI service triggered.",
       };
     } catch (aiError) {
       console.error("Failed to contact AI service:", aiError);
-      // Mark job as failed if AI service request couldn't even start
+      // Mark job as failed if AI service request couldn't start
       await db
         .update(processingJobs)
         .set({
@@ -149,63 +146,6 @@ export async function submitAiJobAction(
       isSuccess: false,
       message:
         error instanceof Error ? error.message : "Error submitting AI job",
-    };
-  }
-}
-
-/**
- * @function getJobStatusAction
- * @async
- * @description
- *  Retrieves status/data for a single job, verifying ownership.
- *
- * @param jobId The ID of the job to retrieve.
- * @returns Promise<ActionState<{ status: string; result?: any; error?: string }>>
- */
-export async function getJobStatusAction(
-  jobId: string
-): Promise<ActionState<{ status: string; result?: any; error?: string }>> {
-  try {
-    const { userId } = auth();
-    if (!userId) {
-      return {
-        isSuccess: false,
-        message: "You must be logged in to perform this action",
-      };
-    }
-
-    // Check the job
-    const job = await db.query.processingJobs.findFirst({
-      where: eq(processingJobs.id, jobId),
-    });
-
-    if (!job) {
-      return {
-        isSuccess: false,
-        message: "Job not found",
-      };
-    }
-
-    if (job.userId !== userId) {
-      return {
-        isSuccess: false,
-        message: "You don't have permission to view this job",
-      };
-    }
-
-    return {
-      isSuccess: true,
-      data: {
-        status: job.status,
-        result: job.resultPayload,
-        error: job.errorMessage || undefined,
-      },
-    };
-  } catch (error) {
-    console.error("Error fetching job status:", error);
-    return {
-      isSuccess: false,
-      message: "Failed to fetch job status",
     };
   }
 }
@@ -254,3 +194,11 @@ export async function listPendingJobsAction(): Promise<
     };
   }
 }
+
+/**
+ * (Removed) getJobStatusAction:
+ * We used to have a server action for retrieving a job's status, but
+ * we decided to unify job status retrieval via the route:
+ *   GET /api/job-status/[jobId]
+ * so the server action is no longer needed and was removed.
+ */
