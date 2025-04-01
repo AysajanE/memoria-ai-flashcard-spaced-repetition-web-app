@@ -1,258 +1,244 @@
+/**
+ * @file index.ts
+ * @description
+ *  This file contains AI-related server actions for Memoria's Next.js app, including:
+ *  - submitAiJobAction: Orchestrates creation of a processing job and triggers the AI service
+ *  - getJobStatusAction: Retrieves the current status/results of a processing job
+ *  - listPendingJobsAction: Debug utility to list all pending jobs for the logged-in user
+ * 
+ * @dependencies
+ *  - Drizzle ORM (db, processingJobs schema, users schema)
+ *  - Clerk auth()
+ *  - ActionState type from our shared types
+ *  - Our AI service client (triggerCardGeneration)
+ * 
+ * @notes
+ *  - We removed repeated user creation logic that used to check if a user existed in DB and create them if not.
+ *    Now we rely solely on the Clerk webhook or other mechanisms to ensure the DB has a record for each user.
+ *  - Always ensure user is authenticated (userId must exist). Return an error if not.
+ *  - This file includes multiple server actions, all of which must return a Promise<ActionState<T>>.
+ */
+
 "use server";
 
-import { auth } from "@clerk/nextjs/server";
-import { db } from "@/db";
-import { processingJobs, decks, flashcards } from "@/db/schema";
-import { triggerCardGeneration } from "@/lib/ai-client";
-import { redirect } from "next/navigation";
-import { ActionState } from "@/types";
+import { auth } from "@clerk/nextjs";
+import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { eq, and } from "drizzle-orm";
-import { FlashcardData } from "@/types";
+import { db } from "@/db";
+import { processingJobs, users } from "@/db/schema";
+import { eq, and, desc } from "drizzle-orm";
+import { ActionState } from "@/types";
+import { triggerCardGeneration } from "@/lib/ai-client";
 
-export async function submitTextForCardsAction(
-  text: string
-): Promise<ActionState<{ jobId: string }>> {
-  // Authentication check
-  const { userId } = auth();
-  if (!userId) {
-    return {
-      isSuccess: false,
-      message: "Authentication required.",
-    };
-  }
-
-  // Input validation
-  if (!text.trim()) {
-    return {
-      isSuccess: false,
-      message: "Please enter some text to generate cards from.",
-      error: {
-        text: ["Text is required"],
-      },
-    };
-  }
-
-  // TODO: Add credit check logic here in Phase 3
-
-  let jobId: string;
-
-  // DB Insert
-  try {
-    const [job] = await db
-      .insert(processingJobs)
-      .values({
-        userId,
-        status: "pending",
-        jobType: "generate-cards",
-        inputPayload: { inputText: text },
-      })
-      .returning({ id: processingJobs.id });
-
-    jobId = job.id;
-  } catch (error) {
-    console.error("Failed to create processing job:", error);
-    return {
-      isSuccess: false,
-      message: "Failed to initiate job. Please try again.",
-    };
-  }
-
-  // Call AI Service
-  try {
-    await triggerCardGeneration({ jobId, text });
-  } catch (error) {
-    console.error("Failed to trigger AI processing:", error);
-    // Update job status to failed
-    await db
-      .update(processingJobs)
-      .set({
-        status: "failed",
-        errorMessage: "Failed to trigger AI processing",
-      })
-      .where(eq(processingJobs.id, jobId));
-
-    return {
-      isSuccess: false,
-      message: "Failed to trigger AI processing. Please try again.",
-    };
-  }
-
-  // Redirect to job status page
-  redirect(`/create/${jobId}`);
-}
-
-const ReviewCardsSchema = z.object({
-  jobId: z.string().uuid(),
-  reviewedCardsData: z
-    .array(
-      z.object({
-        front: z
-          .string()
-          .min(1, "Front text is required")
-          .max(1000, "Front text is too long"),
-        back: z
-          .string()
-          .min(1, "Back text is required")
-          .max(1000, "Back text is too long"),
-        type: z.enum(["qa", "cloze"]).default("qa"),
-      })
-    )
-    .min(1, "At least one card is required")
-    .max(100, "Too many cards"),
-  targetDeck: z
-    .object({
-      id: z.string().uuid().optional(),
-      name: z
-        .string()
-        .min(1, "Deck name is required")
-        .max(100, "Deck name is too long")
-        .optional(),
-    })
-    .refine((data) => data.id || data.name, {
-      message: "Either deck ID or name must be provided",
-    }),
+/**
+ * Input validation schema for job submission.
+ *  - jobType: 'summarize' or 'generate-prompts' (Legacy placeholders)
+ *  - inputPayload: includes text content
+ */
+const submitJobSchema = z.object({
+  jobType: z.enum(["summarize", "generate-prompts"]),
+  inputPayload: z.object({
+    text: z.string().min(1, "Text is required"),
+  }),
+  documentId: z.string().optional(),
 });
 
-export async function reviewCardsAction(
-  jobId: string,
-  reviewedCardsData: FlashcardData[],
-  targetDeck: { id?: string; name?: string }
-): Promise<ActionState<{ deckId: string }>> {
+/**
+ * Creates a new AI job in the database and triggers the Python AI service (async).
+ * 
+ * @param input - jobType, inputPayload, optional documentId
+ * @returns ActionState with { jobId, inputText } if success
+ */
+export async function submitAiJobAction(
+  input: z.infer<typeof submitJobSchema>
+): Promise<ActionState<{ jobId: string; inputText: string }>> {
   try {
     // Authentication check
     const { userId } = auth();
     if (!userId) {
       return {
         isSuccess: false,
-        message: "Authentication required.",
+        message: "You must be logged in to perform this action",
       };
     }
 
     // Validate input
-    const validatedData = ReviewCardsSchema.parse({
-      jobId,
-      reviewedCardsData,
-      targetDeck,
-    });
+    const validatedInput = submitJobSchema.safeParse(input);
+    if (!validatedInput.success) {
+      return {
+        isSuccess: false,
+        message: "Invalid input",
+        error: validatedInput.error.flatten().fieldErrors,
+      };
+    }
 
-    // Verify job exists and belongs to user
+    // Extract text to store
+    const userInputText = validatedInput.data.inputPayload.text;
+
+    // 1) Create the job record in processingJobs
+    let jobRecord;
+    try {
+      const [job] = await db.insert(processingJobs).values({
+        userId,
+        jobType: "generate-cards", // We unify around 'generate-cards'
+        status: "pending",
+        inputPayload: {
+          text: userInputText,
+          type: validatedInput.data.jobType,
+        },
+      })
+      .returning({
+        id: processingJobs.id,
+      });
+      jobRecord = job;
+    } catch (error) {
+      console.error("Error creating job record:", error);
+      return {
+        isSuccess: false,
+        message: "Failed to create job record",
+      };
+    }
+
+    // 2) Call the AI service
+    try {
+      // We can pick a provider or model based on jobType, but for now let's pick defaults:
+      const provider = validatedInput.data.jobType === "summarize" ? "openai" : "anthropic";
+      const model = provider === "openai" ? "gpt-4o-mini" : "claude-haiku-3-5-latest";
+      
+      await triggerCardGeneration({
+        jobId: jobRecord.id,
+        text: userInputText,
+        model,
+        cardType: "qa",
+        numCards: 5,
+      });
+
+      return {
+        isSuccess: true,
+        data: {
+          jobId: jobRecord.id,
+          inputText: userInputText,
+        },
+      };
+    } catch (aiError) {
+      console.error("AI service request failed:", aiError);
+
+      // Update job status to failed
+      await db.update(processingJobs)
+        .set({
+          status: "failed",
+          errorMessage: `Failed to submit to AI service: ${
+            aiError instanceof Error ? aiError.message : String(aiError)
+          }`,
+          completedAt: new Date(),
+        })
+        .where(eq(processingJobs.id, jobRecord.id));
+
+      return {
+        isSuccess: false,
+        message: "Failed to process with AI service",
+      };
+    }
+  } catch (error) {
+    console.error("Error submitting AI job:", error);
+    return {
+      isSuccess: false,
+      message: "Failed to submit job",
+    };
+  }
+}
+
+/**
+ * Retrieves the status of a job from the DB, verifying user ownership.
+ * 
+ * @param jobId string - the job's UUID
+ * @returns ActionState with { status: string; result?: any; error?: string }
+ */
+export async function getJobStatusAction(
+  jobId: string
+): Promise<ActionState<{ status: string; result?: any; error?: string }>> {
+  try {
+    const { userId } = auth();
+    if (!userId) {
+      return {
+        isSuccess: false,
+        message: "You must be logged in to perform this action",
+      };
+    }
+
+    // Basic format check
+    if (!jobId) {
+      return {
+        isSuccess: false,
+        message: "Invalid job ID",
+      };
+    }
+
+    // Fetch the job from DB
     const job = await db.query.processingJobs.findFirst({
-      where: and(
-        eq(processingJobs.id, validatedData.jobId),
-        eq(processingJobs.userId, userId)
-      ),
+      where: and(eq(processingJobs.id, jobId), eq(processingJobs.userId, userId)),
     });
-
     if (!job) {
       return {
         isSuccess: false,
-        message: "Job not found or unauthorized.",
+        message: "Job not found or unauthorized",
       };
     }
 
-    if (job.status !== "completed") {
+    return {
+      isSuccess: true,
+      data: {
+        status: job.status,
+        result: job.resultPayload ?? undefined,
+        error: job.errorMessage ?? undefined,
+      },
+    };
+  } catch (error) {
+    console.error("Error fetching job status:", error);
+    return {
+      isSuccess: false,
+      message: "Failed to fetch job status",
+    };
+  }
+}
+
+/**
+ * Debug function: Lists all 'pending' jobs for the authenticated user.
+ * 
+ * @returns ActionState with an array of pending jobs
+ */
+export async function listPendingJobsAction(): Promise<
+  ActionState<Array<{ id: string; status: string; createdAt: Date }>>
+> {
+  try {
+    const { userId } = auth();
+    if (!userId) {
       return {
         isSuccess: false,
-        message: "Job must be completed before reviewing cards.",
+        message: "You must be logged in to perform this action",
       };
     }
 
-    // Use a transaction to ensure data consistency
-    const result = await db.transaction(async (tx) => {
-      let finalDeckId: string;
-
-      // Find or create deck
-      if (validatedData.targetDeck.id) {
-        // Verify deck exists and belongs to user
-        const existingDeck = await tx.query.decks.findFirst({
-          where: and(
-            eq(decks.id, validatedData.targetDeck.id),
-            eq(decks.userId, userId)
-          ),
-        });
-
-        if (!existingDeck) {
-          throw new Error("Deck not found or unauthorized");
-        }
-
-        finalDeckId = validatedData.targetDeck.id;
-      } else {
-        // Create new deck
-        const [newDeck] = await tx
-          .insert(decks)
-          .values({
-            name: validatedData.targetDeck.name!,
-            userId,
-          })
-          .returning({ id: decks.id });
-
-        finalDeckId = newDeck.id;
-      }
-
-      // Prepare flashcard data
-      const preparedFlashcards = validatedData.reviewedCardsData.map(
-        (card) => ({
-          deckId: finalDeckId,
-          userId,
-          front: card.front,
-          back: card.back,
-          cardType: card.type || "qa",
-          srsLevel: 0,
-          srsInterval: 0,
-          srsEaseFactor: "2.50",
-          srsDueDate: new Date(),
-        })
-      );
-
-      // Insert flashcards
-      await tx.insert(flashcards).values(preparedFlashcards);
-
-      // Update job status to note that the cards have been saved to a deck
-      await tx
-        .update(processingJobs)
-        .set({
-          updatedAt: new Date(),
-          status: "completed",
-          resultMetadata: { 
-            ...job.resultMetadata,
-            savedToDeck: finalDeckId,
-            savedAt: new Date().toISOString()
-          },
-        })
-        .where(eq(processingJobs.id, validatedData.jobId));
-
-      return finalDeckId;
+    // Fetch all pending jobs for the user
+    const pendingJobs = await db.query.processingJobs.findMany({
+      where: and(eq(processingJobs.userId, userId), eq(processingJobs.status, "pending")),
+      orderBy: (jobs, { desc }) => [desc(jobs.createdAt)],
+      columns: {
+        id: true,
+        status: true,
+        createdAt: true,
+      },
     });
 
     return {
       isSuccess: true,
-      message: "Cards saved successfully",
-      data: { deckId: result },
+      data: pendingJobs,
     };
   } catch (error) {
-    console.error("Error in reviewCardsAction:", error);
-
-    if (error instanceof z.ZodError) {
-      // Create a clean object without undefined values
-      const cleanFieldErrors: Record<string, string[]> = {};
-      
-      Object.entries(error.formErrors.fieldErrors).forEach(([key, value]) => {
-        if (value !== undefined) {
-          cleanFieldErrors[key] = value;
-        }
-      });
-      
-      return {
-        isSuccess: false,
-        message: "Invalid input data",
-        error: cleanFieldErrors,
-      };
-    }
-
+    console.error("Error fetching pending jobs:", error);
     return {
       isSuccess: false,
-      message: error instanceof Error ? error.message : "Failed to save cards",
+      message: "Failed to fetch pending jobs",
     };
   }
 }
