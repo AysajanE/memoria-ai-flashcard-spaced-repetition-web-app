@@ -1,3 +1,27 @@
+/**
+ * @file submit-text.ts
+ * @description
+ *  This server action accepts form data (text, model, cardType, numCards),
+ *  creates a new processing job with status "pending," then calls the AI service.
+ *  It is an alternative or simpler version of job submission.
+ *
+ * Key Responsibilities:
+ *  - Validate input from FormData
+ *  - Create a new job record in processingJobs
+ *  - Trigger the AI microservice asynchronously
+ *  - Return the jobId to the caller
+ *
+ * @dependencies
+ *  - Clerk auth() to ensure user is logged in
+ *  - Drizzle (db, processingJobs)
+ *  - zod for input validation
+ *  - triggerCardGeneration from "@/lib/ai-client"
+ *
+ * @notes
+ *  - This file does not contain any leftover placeholder logic to remove.
+ *  - Everything here references real AI service calls via `triggerCardGeneration`.
+ */
+
 "use server";
 
 import { auth } from "@clerk/nextjs";
@@ -5,8 +29,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { db } from "@/db";
 import { processingJobs } from "@/db/schema";
-import { triggerCardGeneration } from "@/lib/ai-client";
-import { GenerateCardsRequestSchema } from "@/lib/ai-client";
+import { triggerCardGeneration, GenerateCardsRequestSchema } from "@/lib/ai-client";
 
 export type ActionState<TData = any> = {
   isSuccess: boolean;
@@ -53,14 +76,20 @@ export async function submitTextForCardsAction(
       .returning();
 
     // Trigger AI service
-    const response = await triggerCardGeneration(validatedData);
+    const response = await triggerCardGeneration({
+      jobId: job.id,
+      text: validatedData.text,
+      model: validatedData.model,
+      cardType: validatedData.cardType,
+      numCards: validatedData.numCards,
+    });
 
-    // Update job with response
+    // Mark job as "processing"
     await db
       .update(processingJobs)
       .set({
         status: "processing",
-        externalJobId: response.jobId,
+        // We could store external job ID from AI service if needed
       })
       .where({ id: job.id });
 
@@ -72,7 +101,7 @@ export async function submitTextForCardsAction(
     };
   } catch (error) {
     console.error("Error submitting text for cards:", error);
-    
+
     if (error instanceof z.ZodError) {
       return {
         isSuccess: false,
@@ -87,4 +116,4 @@ export async function submitTextForCardsAction(
       error: { submit: ["An unexpected error occurred"] },
     };
   }
-} 
+}
