@@ -195,7 +195,7 @@ export function ApproveDialog({
             
             {newDeckName && (
               <div className="px-3 py-2 bg-purple-50 dark:bg-purple-900/20 rounded-lg text-sm text-purple-700 dark:text-purple-300 animate-fade-in">
-                New deck "{newDeckName}" will be created
+                New deck &quot;{newDeckName}&quot; will be created
               </div>
             )}
           </div>

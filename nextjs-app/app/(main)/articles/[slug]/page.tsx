@@ -62,7 +62,7 @@ export default async function ArticlePage({ params }: ArticlePageProps) {
         
         <div className="mt-12 pt-6 border-t border-gray-200 dark:border-gray-700">
           <div className="bg-gradient-to-br from-indigo-50 to-purple-50 dark:from-indigo-900/30 dark:to-purple-900/30 rounded-xl p-6 border border-indigo-100 dark:border-indigo-800">
-            <h3 className="text-xl font-bold mb-3">Ready to apply what you've learned?</h3>
+            <h3 className="text-xl font-bold mb-3">Ready to apply what you&apos;ve learned?</h3>
             <p className="text-gray-700 dark:text-gray-300 mb-4">
               Create flashcards based on this article and start practicing with spaced repetition.
             </p>
