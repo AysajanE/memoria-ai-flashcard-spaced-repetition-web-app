@@ -1,49 +1,44 @@
 /**
  * @file decks.ts
  * @description
- *  Server Actions related to deck creation and retrieval for Memoria.
- *
- * Key responsibilities:
- *  - Provide actions to fetch user's decks
- *  - Provide an action to fetch user's decks *with* the number of flashcards in each
- *  - Provide an action to create a new deck
- *  - Provide the reviewCardsAction to save AI-generated flashcards to decks
+ *  Provides server actions related to Deck management in Memoria. 
+ *  This includes fetching the user's decks, creating new decks, and 
+ *  the critical "reviewCardsAction" that saves AI-generated flashcards 
+ *  to the selected deck after the user approves them.
  *
  * @dependencies
- *  - Clerk auth() for user verification
- *  - Drizzle ORM (db, decks schema, flashcards schema)
+ *  - Drizzle ORM for database interaction
+ *  - Clerk for user authentication (auth())
  *  - Zod for input validation
  *
  * @notes
- *  - In earlier implementations, we had a function called `saveJobFlashcardsAction`
- *    for saving AI-generated flashcards to a deck, but that has been superseded by
- *    a unified approach using `reviewCardsAction`.
- *  - This file now focuses on deck listing and creation tasks, plus a specialized
- *    deck-fetch with flashcard counts. 
+ *  - We renamed "saveJobFlashcardsAction" to "reviewCardsAction" to match 
+ *    the plan's wording. This function is responsible for the final step 
+ *    of assigning approved flashcards to a deck once the user confirms 
+ *    or creates a new deck in the ApproveDialog.
  */
 
 "use server";
 
 import { auth } from "@clerk/nextjs";
 import { db } from "@/db";
-import { decks } from "@/db/schema";
-import { flashcards } from "@/db/schema";
-import { processingJobs } from "@/db/schema";
-import { eq, sql } from "drizzle-orm";
+import { decks, flashcards, processingJobs, users } from "@/db/schema";
+import { eq, sql, inArray } from "drizzle-orm";
 import { ActionState } from "@/types";
 import { Deck } from "@/types";
 import { z } from "zod";
 
+// -------------- GET DECKS ACTION --------------
 /**
  * @function getDecksAction
  * @async
  * @description
- *  Retrieves all decks belonging to the authenticated user (without flashcard counts).
+ *  Fetches all decks belonging to the current user.
  *
  * @returns {Promise<ActionState<Deck[]>>}
- *  - isSuccess: boolean
- *  - message: optional string for error/success detail
- *  - data: Deck array if successful
+ *  isSuccess: Whether the operation succeeded.
+ *  data: Array of Deck objects if successful.
+ *  message: Error message if any issue arises.
  */
 export async function getDecksAction(): Promise<ActionState<Deck[]>> {
   try {
@@ -73,20 +68,29 @@ export async function getDecksAction(): Promise<ActionState<Deck[]>> {
   }
 }
 
-// Schema for deck creation
+// -------------- CREATE DECK ACTION --------------
+/**
+ * Zod schema for creating a deck. 
+ * We limit name length to 100 as a basic constraint.
+ */
 const CreateDeckSchema = z.object({
-  name: z.string().min(1, "Deck name is required").max(100, "Deck name is too long"),
+  name: z
+    .string()
+    .min(1, "Deck name is required")
+    .max(100, "Deck name is too long"),
 });
 
 /**
  * @function createDeckAction
  * @async
  * @description
- *  Creates a new deck for the authenticated user, using validated input.
+ *  Creates a new deck for the current user, assigning userId from Clerk's auth().
  *
- * @param name The desired name for the new deck
+ * @param name The user-provided deck name (validated by Zod).
  * @returns {Promise<ActionState<{ deckId: string }>>}
- *  - data: Contains newly created deck's ID if successful
+ *  isSuccess: Whether the creation succeeded.
+ *  data.deckId: The new deck's ID if created successfully.
+ *  message: Optional status or error info.
  */
 export async function createDeckAction(
   name: string
@@ -119,23 +123,23 @@ export async function createDeckAction(
     };
   } catch (error) {
     console.error("Error creating deck:", error);
-    
+
     if (error instanceof z.ZodError) {
       const cleanFieldErrors: Record<string, string[]> = {};
-      
+
       Object.entries(error.formErrors.fieldErrors).forEach(([key, value]) => {
         if (value !== undefined) {
           cleanFieldErrors[key] = value;
         }
       });
-      
+
       return {
         isSuccess: false,
         message: "Invalid input data",
         error: cleanFieldErrors,
       };
     }
-    
+
     return {
       isSuccess: false,
       message: error instanceof Error ? error.message : "Failed to create deck",
@@ -143,63 +147,7 @@ export async function createDeckAction(
   }
 }
 
-/**
- * @function getDecksWithCardCountsAction
- * @async
- * @description
- *  Retrieves all decks for the authenticated user, along with a count of how many
- *  flashcards each deck contains. This is useful for showing "X cards" in the UI.
- *
- * @returns {Promise<ActionState<Array<Deck & { cardCount: number }>>>}
- *  - isSuccess: boolean
- *  - message: optional string for error/success detail
- *  - data: an array of deck objects with an extra `cardCount` field
- */
-export async function getDecksWithCardCountsAction(): Promise<ActionState<Array<Deck & { cardCount: number }>>> {
-  try {
-    const { userId } = auth();
-    if (!userId) {
-      return {
-        isSuccess: false,
-        message: "Unauthorized",
-      };
-    }
-
-    // Perform a left join to count how many flashcards are in each deck
-    // Then group by deck.id so the aggregate can happen
-    const rows = await db
-      .select({
-        id: decks.id,
-        userId: decks.userId,
-        name: decks.name,
-        createdAt: decks.createdAt,
-        updatedAt: decks.updatedAt,
-        cardCount: sql<number>`COUNT(${flashcards.id})`.as("cardCount"),
-      })
-      .from(decks)
-      .leftJoin(flashcards, eq(decks.id, flashcards.deckId))
-      .where(eq(decks.userId, userId))
-      .groupBy(decks.id);
-
-    return {
-      isSuccess: true,
-      data: rows.map((row) => ({
-        ...row,
-        cardCount: Number(row.cardCount || 0),
-      })),
-    };
-  } catch (error) {
-    console.error("Error fetching decks with card counts:", error);
-    return {
-      isSuccess: false,
-      message:
-        error instanceof Error
-          ? error.message
-          : "Failed to fetch decks with card counts",
-    };
-  }
-}
-
+// -------------- REVIEW CARDS ACTION (Renamed) --------------
 /**
  * @function reviewCardsAction
  * @async
@@ -300,72 +248,143 @@ export async function reviewCardsAction(
         return {
           isSuccess: false,
           message: "Unauthorized",
-          error: { auth: ["You do not have permission to access this deck"] },
+          error: { auth: ["You do not have permission to save to this deck"] },
         };
       }
 
-      // Add cards to existing deck
+      // Add the cards to the existing deck
       await db.insert(flashcards).values(
         cards.map((card) => ({
           deckId: existingDeck.id,
           userId,
           front: card.front,
           back: card.back,
-          cardType: (card.type === "cloze" ? "cloze" : "qa") as "qa" | "cloze",
+          cardType: (card.type === "cloze" ? "cloze" : "qa"),
+          // Set default SRS values
+          srsLevel: 0,
+          srsInterval: 0,
+          srsDueDate: new Date(),
+          srsEaseFactor: 2.5,
         }))
       );
 
-      // Update job to reflect a changed updatedAt (job remains "completed")
-      // so we track that the user assigned the cards
-      await db.update(processingJobs).set({
-        updatedAt: new Date(),
-      }).where(eq(processingJobs.id, jobId));
-
       return {
         isSuccess: true,
-        message: "Flashcards added to existing deck successfully",
+        message: `Successfully saved ${cards.length} flashcards to deck "${existingDeck.name}"`,
         data: { deckId: existingDeck.id },
       };
-    }
+    } else {
+      // User wants to create a new deck
+      // Validate new deck name
+      const validatedName = CreateDeckSchema.safeParse({ name: deckNameOrId });
+      if (!validatedName.success) {
+        return {
+          isSuccess: false,
+          message: "Invalid deck name",
+          error: validatedName.error.flatten().fieldErrors,
+        };
+      }
 
-    // Otherwise, create a new deck and add the cards
-    // We'll do a transaction so the deck and flashcards are created atomically
-    const createdDeck = await db.transaction(async (tx) => {
-      const [newDeck] = await tx.insert(decks).values({
-        userId,
-        name: deckNameOrId || "Untitled Deck",
-      }).returning();
+      // Create new deck
+      const [newDeck] = await db
+        .insert(decks)
+        .values({
+          userId,
+          name: deckNameOrId,
+        })
+        .returning({ id: decks.id, name: decks.name });
 
-      await tx.insert(flashcards).values(
+      // Add cards to new deck
+      await db.insert(flashcards).values(
         cards.map((card) => ({
           deckId: newDeck.id,
           userId,
           front: card.front,
           back: card.back,
-          cardType: (card.type === "cloze" ? "cloze" : "qa") as "qa" | "cloze",
+          cardType: (card.type === "cloze" ? "cloze" : "qa"),
+          // Set default SRS values
+          srsLevel: 0,
+          srsInterval: 0,
+          srsDueDate: new Date(),
+          srsEaseFactor: 2.5,
         }))
       );
 
-      return newDeck;
-    });
-
-    // Also update the job's updatedAt
-    await db
-      .update(processingJobs)
-      .set({ updatedAt: new Date() })
-      .where(eq(processingJobs.id, jobId));
-
-    return {
-      isSuccess: true,
-      message: "New deck created and flashcards saved",
-      data: { deckId: createdDeck.id },
-    };
+      return {
+        isSuccess: true,
+        message: `Successfully created deck "${newDeck.name}" with ${cards.length} flashcards`,
+        data: { deckId: newDeck.id },
+      };
+    }
   } catch (error) {
-    console.error("Error saving job flashcards to deck:", error);
+    console.error("Error in reviewCardsAction:", error);
     return {
       isSuccess: false,
       message: "Failed to save flashcards",
-      error: { server: ["An unexpected error occurred"] },
+      error: { save: ["An unexpected error occurred"] },
+    };
+  }
+}
+
+/**
+ * @function getDecksWithCardCountsAction
+ * @async
+ * @description
+ *  Fetches all decks belonging to the current user with a count of flashcards in each deck.
+ *
+ * @returns {Promise<ActionState<(Deck & { cardCount: number })[]>>}
+ *  isSuccess: Whether the operation succeeded.
+ *  data: Array of Deck objects with cardCount property if successful.
+ *  message: Error message if any issue arises.
+ */
+export async function getDecksWithCardCountsAction(): Promise<ActionState<Array<Deck & { cardCount: number }>>> {
+  try {
+    const { userId } = auth();
+    if (!userId) {
+      return {
+        isSuccess: false,
+        message: "Unauthorized",
+      };
+    }
+
+    // Query all decks for the current user
+    const userDecks = await db
+      .select()
+      .from(decks)
+      .where(eq(decks.userId, userId));
+    
+    // Return early if no decks
+    if (userDecks.length === 0) {
+      return {
+        isSuccess: true,
+        data: [],
+      };
+    }
+
+    // For each deck, count cards in a separate query (simpler approach)
+    const decksWithCounts = await Promise.all(
+      userDecks.map(async (deck) => {
+        const count = await db
+          .select({ count: sql`count(*)` })
+          .from(flashcards)
+          .where(eq(flashcards.deckId, deck.id));
+        
+        return {
+          ...deck,
+          cardCount: Number(count[0]?.count || 0),
+        };
+      })
+    );
+
+    return {
+      isSuccess: true,
+      data: decksWithCounts,
+    };
+  } catch (error) {
+    console.error("Error fetching decks with card counts:", error);
+    return {
+      isSuccess: false,
+      message: "Failed to fetch decks",
     };
   }
 }
