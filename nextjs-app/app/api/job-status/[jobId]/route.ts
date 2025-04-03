@@ -1,39 +1,30 @@
-import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs";
 import { db } from "@/db";
 import { processingJobs } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
-import { z } from "zod";
-
-export const runtime = 'nodejs'; // Use Node.js runtime
-
-// UUID validation regex
-const UUID_REGEX =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+import { NextResponse } from "next/server";
 
 export async function GET(
   request: Request,
   { params }: { params: { jobId: string } }
 ) {
   try {
-    console.log(`Job status check for ${params.jobId}`);
-    
-    // Get authenticated user
     const { userId } = auth();
     if (!userId) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return NextResponse.json(
+        { error: "Unauthorized" },
+        { status: 401 }
+      );
     }
 
-    // Validate jobId format
-    const { jobId } = params;
-    if (!jobId || !UUID_REGEX.test(jobId)) {
+    const jobId = params.jobId;
+    if (!jobId) {
       return NextResponse.json(
-        { error: "Invalid job ID format" },
+        { error: "Job ID is required" },
         { status: 400 }
       );
     }
 
-    // Query job from database
     const job = await db.query.processingJobs.findFirst({
       where: and(
         eq(processingJobs.id, jobId),
@@ -41,31 +32,28 @@ export async function GET(
       ),
     });
 
-    // Check if job exists and belongs to user
     if (!job) {
       return NextResponse.json(
-        { error: "Not Found or Forbidden" },
+        { error: "Job not found or unauthorized" },
         { status: 404 }
       );
     }
 
-    // Return job details with timestamp for debugging
+    // Return only the necessary data for the client
     return NextResponse.json({
       id: job.id,
       status: job.status,
-      resultPayload: job.resultPayload,
-      errorMessage: job.errorMessage,
+      jobType: job.jobType,
       createdAt: job.createdAt,
       updatedAt: job.updatedAt,
-      completedAt: job.completedAt,
-      currentTime: new Date(),
-      ageInSeconds: job.createdAt ? Math.floor((Date.now() - job.createdAt.getTime()) / 1000) : null
+      resultPayload: job.resultPayload,
+      errorMessage: job.errorMessage,
     });
   } catch (error) {
     console.error("Error fetching job status:", error);
     return NextResponse.json(
-      { error: "Internal Server Error", details: String(error) },
+      { error: "Failed to fetch job status" },
       { status: 500 }
     );
   }
-}
+} 

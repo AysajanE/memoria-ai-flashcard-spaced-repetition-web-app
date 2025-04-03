@@ -1,124 +1,100 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { processingJobs } from "@/db/schema";
 import { eq } from "drizzle-orm";
+import { z } from "zod";
 
-export async function POST(req: NextRequest): Promise<NextResponse> {
+// Define error detail schema for better error handling
+const ErrorCategory = z.enum([
+  "invalid_input",
+  "token_limit",
+  "auth_error",
+  "rate_limit",
+  "ai_model_error",
+  "parse_error",
+  "network_error",
+  "webhook_error",
+  "internal_error",
+  "unknown_error"
+]);
+
+const ErrorDetailSchema = z.object({
+  message: z.string(),
+  category: ErrorCategory,
+  code: z.string().nullable().optional(),
+  context: z.record(z.any()).nullable().optional(),
+  retryable: z.boolean().default(false),
+  suggestedAction: z.string().nullable().optional()
+});
+
+// Define the expected payload schema
+const StatusUpdateSchema = z.object({
+  jobId: z.string().uuid(),
+  status: z.enum(["completed", "failed"]),
+  resultPayload: z.any().optional(),
+  errorDetail: ErrorDetailSchema.optional(),
+  errorMessage: z.string().optional(), // Kept for backward compatibility
+});
+
+export async function POST(request: Request) {
   try {
-    console.log("AI service webhook received");
-    
-    // Verify internal API key
-    const apiKey = req.headers.get("x-internal-api-key");
-    if (apiKey !== process.env.INTERNAL_API_KEY) {
-      console.error("Invalid API key in webhook request");
+    // Verify API Key
+    const apiKey = request.headers.get("x-internal-api-key");
+    if (!apiKey || apiKey !== process.env.INTERNAL_API_KEY) {
       return NextResponse.json(
-        { error: "Unauthorized" },
+        { error: "Unauthorized", errorCode: "INVALID_API_KEY" },
         { status: 401 }
       );
     }
 
-    // Parse the request body
-    const body = await req.text();
-    console.log("Request body:", body);
-    
-    let data;
-    try {
-      data = JSON.parse(body);
-      console.log("Parsed data:", JSON.stringify(data, null, 2));
-    } catch (parseError) {
-      console.error("Failed to parse JSON body:", parseError);
-      return NextResponse.json(
-        { error: "Invalid JSON body" },
-        { status: 400 }
-      );
-    }
-    
-    const { jobId, status } = data;
-    
-    if (!jobId || !status) {
-      console.error("Missing required fields in webhook payload", { jobId, status });
-      return NextResponse.json(
-        { error: "Bad request: missing required fields" },
-        { status: 400 }
-      );
-    }
+    // Parse and validate payload
+    const payload = await request.json();
+    const validatedPayload = StatusUpdateSchema.parse(payload);
 
-    console.log(`Processing AI service webhook for job ${jobId} with status ${status}`);
+    // Update job record
+    const [updatedJob] = await db
+      .update(processingJobs)
+      .set({
+        status: validatedPayload.status,
+        resultPayload: validatedPayload.resultPayload,
+        // For backward compatibility, prioritize errorDetail but fall back to errorMessage
+        errorMessage: validatedPayload.errorDetail?.message || validatedPayload.errorMessage,
+        // Store the full error detail as a JSON object
+        errorDetail: validatedPayload.errorDetail ? JSON.stringify(validatedPayload.errorDetail) : null,
+        completedAt: new Date(),
+      })
+      .where(eq(processingJobs.id, validatedPayload.jobId))
+      .returning();
 
-    try {
-      // Find the job in the database first
-      const existingJob = await db.query.processingJobs.findFirst({
-        where: eq(processingJobs.id, jobId)
-      });
-      
-      if (!existingJob) {
-        console.error(`Job ${jobId} not found in database`);
-        return NextResponse.json(
-          { error: "Job not found" },
-          { status: 404 }
-        );
-      }
-
-      // Update the job record in the database
-      if (status === "completed") {
-        // Handle successful job completion
-        const result = data.result || data.resultPayload;
-        
-        if (!result) {
-          console.error("Completed status but no result provided");
-          return NextResponse.json(
-            { error: "No result payload found for completed job" },
-            { status: 400 }
-          );
-        }
-        
-        await db.update(processingJobs)
-          .set({
-            status: "completed",
-            resultPayload: result,
-            completedAt: new Date()
-          })
-          .where(eq(processingJobs.id, jobId));
-        
-        console.log(`Job ${jobId} updated to completed successfully`);
-      } else if (status === "failed") {
-        // Handle job failure
-        const errorMessage = data.errorMessage || 
-                            (data.error?.message) || 
-                            (data.errorDetail?.message) || 
-                            "Unknown error";
-        
-        await db.update(processingJobs)
-          .set({
-            status: "failed",
-            errorMessage: errorMessage,
-            completedAt: new Date()
-          })
-          .where(eq(processingJobs.id, jobId));
-        
-        console.error(`Job ${jobId} updated to failed: ${errorMessage}`);
-      } else {
-        // Handle unknown status
-        console.warn(`Unknown job status received: ${status}`);
-        return NextResponse.json(
-          { error: "Invalid status" },
-          { status: 400 }
-        );
-      }
-    } catch (dbError) {
-      console.error(`Database error updating job ${jobId}:`, dbError);
+    if (!updatedJob) {
+      console.warn(`Job not found: ${validatedPayload.jobId}`);
       return NextResponse.json(
-        { error: "Database error", message: String(dbError) },
-        { status: 500 }
+        { error: "Job not found", errorCode: "JOB_NOT_FOUND" },
+        { status: 404 }
       );
     }
 
-    return NextResponse.json({ success: true });
-  } catch (error) {
-    console.error("Error processing AI service webhook:", error);
     return NextResponse.json(
-      { error: "Internal server error" },
+      { message: "Status updated successfully" },
+      { status: 200 }
+    );
+  } catch (error) {
+    console.error("Error processing AI service status update:", error);
+
+    if (error instanceof z.ZodError) {
+      return NextResponse.json(
+        {
+          error: "Invalid payload",
+          errorCode: "INVALID_PAYLOAD",
+          details: error.errors,
+        },
+        { status: 400 }
+      );
+    }
+
+    return NextResponse.json(
+      { error: "Internal server error", errorCode: "INTERNAL_ERROR" },
       { status: 500 }
     );
   }
-} 
+}

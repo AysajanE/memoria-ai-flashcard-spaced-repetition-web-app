@@ -1,23 +1,24 @@
 /**
- * @file page.tsx
+ * @file page.tsx (JobStatusPage)
  * @description
- *  This page displays the status of a specific AI processing job and, once completed,
- *  shows the generated flashcards with an option to review, edit, and assign them to a deck.
- *
- * Key functionalities:
- *  - Fetch/poll the backend endpoint `/api/job-status/[jobId]` to get the latest job status
- *  - When job status = "completed", display the generated cards
- *  - When job status = "failed", display the error details
- *  - Provide a dialog for saving the cards to a user deck (using `reviewCardsAction` from the AI actions)
+ *  This page displays the AI processing job status and, once completed,
+ *  shows the generated flashcards. The user can approve them and assign 
+ *  them to an existing or new deck. We rename and call "reviewCardsAction" 
+ *  to finalize saving to the DB.
  *
  * @dependencies
- *  - React/Next for UI rendering
- *  - `reviewCardsAction` from `@/actions/ai/...` to finalize deck assignment
- *  - `getDecksAction` from `@/actions/db/decks` to list user decks in the UI
- *  - `toast` for user notifications
- *  - Shadcn/ui components for styling (Dialog, Button, Input, etc.)
- *  - `useTransition` from React to handle server action transitions
- *  - Clerk Auth is handled via route protection; user must be signed in to access
+ *  - Next.js (useRouter, useParams)
+ *  - React (useState, useEffect, useTransition)
+ *  - Sonner (toast)
+ *  - Shadcn/ui (Dialog, Button, etc.)
+ *  - Our newly named "reviewCardsAction" from `db/decks.ts`
+ *
+ * @notes
+ *  - This completes the "review & approve" step in the plan: user sees generated 
+ *    cards, picks a deck or creates a new deck (in ApproveDialog), and we call 
+ *    "reviewCardsAction" to save them. 
+ *  - We poll /api/job-status/[jobId] for job status transitions and only show the 
+ *    final result once it's "completed" or "failed."
  */
 
 "use client";
@@ -28,7 +29,7 @@ import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/shared/page-header";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import { getDecksAction, reviewCardsAction } from "@/actions/db/decks";
+import { reviewCardsAction, getDecksAction } from "@/actions/db/decks";
 import {
   Dialog,
   DialogContent,
@@ -49,7 +50,7 @@ import {
 import { ChangeEvent } from "react";
 
 /**
- * Type definition for job data fetched from /api/job-status/[jobId].
+ * Minimal type for the data we receive from /api/job-status/[jobId].
  */
 interface JobData {
   id: string;
@@ -65,14 +66,9 @@ interface JobData {
 }
 
 /**
- * The main React component to display and handle AI job status + final results.
- * 
- * The user can also assign the generated flashcards to a deck at the end of the process.
+ * Our main component for the "review & approve" step.
  */
 export default function JobStatusPage({ params }: { params: { jobId: string } }) {
-  /**
-   * Local state for job info, potential errors, and the deck assignment dialog.
-   */
   const router = useRouter();
   const { jobId } = params;
 
@@ -86,22 +82,15 @@ export default function JobStatusPage({ params }: { params: { jobId: string } })
   const [deckName, setDeckName] = useState("");
   const [dialogError, setDialogError] = useState<string | null>(null);
 
-  // Tracks if we are currently saving flashcards to the deck
+  // Tracks if we are currently saving flashcards
   const [isSaving, setIsSaving] = useState(false);
 
-  // Let React manage server action transitions for us
+  // Let React manage transitions
   const [isPending, startTransition] = useTransition();
 
-  // Tracks if we should keep polling job status
-  const [shouldPoll, setShouldPoll] = useState(true);
-
-  /**
-   * Poll the job status from the Next.js route /api/job-status/[jobId].
-   * We'll poll every ~3 seconds as long as the job is not 'completed' or 'failed'.
-   * If there's an error, we stop polling and set error state.
-   */
+  // Polling for job status
   useEffect(() => {
-    let intervalId: NodeJS.Timeout | null = null;
+    let intervalId: NodeJS.Timer | null = null;
 
     async function fetchJobStatus() {
       try {
@@ -115,24 +104,25 @@ export default function JobStatusPage({ params }: { params: { jobId: string } })
         setJobState(data);
 
         if (data.status === "completed" || data.status === "failed") {
-          // Once job is final, stop polling
-          setShouldPoll(false);
+          if (intervalId) clearInterval(intervalId);
         }
       } catch (err) {
         console.error("Error fetching job status:", err);
-        setError(
-          err instanceof Error ? err.message : "An unexpected error occurred"
-        );
-        setShouldPoll(false);
+        setError(err instanceof Error ? err.message : "An unexpected error occurred");
+        if (intervalId) clearInterval(intervalId);
       }
     }
 
-    // Initial status check
+    // Initial fetch
     fetchJobStatus();
 
-    // Poll every 3s until done or error
+    // Poll every 3s while pending or processing
     intervalId = setInterval(() => {
-      if (shouldPoll) {
+      if (
+        jobState?.status !== "completed" &&
+        jobState?.status !== "failed" &&
+        !error
+      ) {
         fetchJobStatus();
       } else {
         if (intervalId) clearInterval(intervalId);
@@ -142,7 +132,7 @@ export default function JobStatusPage({ params }: { params: { jobId: string } })
     return () => {
       if (intervalId) clearInterval(intervalId);
     };
-  }, [jobId, shouldPoll]);
+  }, [jobId, jobState?.status, error]);
 
   /**
    * Once the user wants to save the flashcards to a deck, we open a dialog.
@@ -151,9 +141,8 @@ export default function JobStatusPage({ params }: { params: { jobId: string } })
   useEffect(() => {
     if (isDialogOpen) {
       setDialogError(null);
-
-      // Load user's decks
       setIsLoadingDecks(true);
+
       getDecksAction()
         .then((result) => {
           if (result.isSuccess && result.data) {
@@ -172,13 +161,12 @@ export default function JobStatusPage({ params }: { params: { jobId: string } })
     }
   }, [isDialogOpen]);
 
-  // Tracks if we're in the middle of loading the deck list
+  // Keep track if we are in the middle of loading the deck list
   const [isLoadingDecks, setIsLoadingDecks] = useState(false);
 
   /**
-   * Handler to "approve" and save the generated flashcards to a user-chosen
-   * or newly created deck. This now defers to a separate server action 
-   * called `reviewCardsAction` in the AI actions code.
+   * This method is triggered when the user clicks the final "Save Flashcards"
+   * inside our ApproveDialog. We either create a new deck or save to an existing deck.
    */
   async function handleSaveFlashcards() {
     if (!jobState?.resultPayload?.cards) {
@@ -198,19 +186,19 @@ export default function JobStatusPage({ params }: { params: { jobId: string } })
     setIsSaving(true);
 
     try {
-      // Call the reviewCardsAction with the appropriate parameters
       startTransition(async () => {
-        const result = selectedDeckId 
+        const response = selectedDeckId
           ? await reviewCardsAction(jobId, selectedDeckId, true)
           : await reviewCardsAction(jobId, deckName);
-          
-        if (result.isSuccess) {
-          toast.success("Flashcards assigned to deck successfully!");
+
+        if (response.isSuccess) {
+          toast.success("Flashcards saved successfully!");
           setIsDialogOpen(false);
-          router.push("/decks");
+          // If we used an existing deckId, go to it. Otherwise, also go to that deck.
+          router.push(`/study/${response.data?.deckId}`);
         } else {
-          setDialogError(result.message || "Failed to save flashcards");
-          toast.error(result.message || "Failed to save flashcards");
+          toast.error(response.message || "Failed to save flashcards");
+          setDialogError(response.message || "Failed to save flashcards");
         }
         setIsSaving(false);
       });
@@ -221,9 +209,6 @@ export default function JobStatusPage({ params }: { params: { jobId: string } })
     }
   }
 
-  /**
-   * Render the main content depending on job status.
-   */
   function renderContent() {
     if (error) {
       return (
@@ -237,7 +222,6 @@ export default function JobStatusPage({ params }: { params: { jobId: string } })
     }
 
     if (!jobState) {
-      // We haven't fetched the job yet or are still fetching
       return (
         <div className="flex flex-col items-center justify-center space-y-4 py-8">
           <Loader2 className="text-primary h-8 w-8 animate-spin" />
@@ -270,7 +254,7 @@ export default function JobStatusPage({ params }: { params: { jobId: string } })
               viewBox="0 0 24 24"
               stroke="currentColor"
             >
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 20c-.77 1.333-2.694 1.333-3.464 0L3.34 7c-.77-1.333.192-3 1.732-3z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M6.938 4h13.124c1.54 0 2.502 1.667 1.732 3L13.732 20c-.77 1.333-2.694 1.333-3.464 0L3.34 7c-.77-1.333.192-3 1.732-3z" />
             </svg>
           </div>
           <h2 className="text-xl font-bold text-red-600">Generation Failed</h2>
@@ -282,7 +266,7 @@ export default function JobStatusPage({ params }: { params: { jobId: string } })
       );
     }
 
-    // If status === 'completed' and we have resultPayload
+    // Status === 'completed'
     const cards = jobState.resultPayload?.cards || [];
     return (
       <div className="space-y-6">
