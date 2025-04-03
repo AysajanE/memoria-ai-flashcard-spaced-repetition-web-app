@@ -32,8 +32,8 @@ const StatusUpdateSchema = z.object({
   jobId: z.string().uuid(),
   status: z.enum(["completed", "failed"]),
   resultPayload: z.any().optional(),
-  errorDetail: ErrorDetailSchema.optional(),
-  errorMessage: z.string().optional(), // Kept for backward compatibility
+  errorDetail: ErrorDetailSchema.nullable().optional(),
+  errorMessage: z.string().nullable().optional(), // Kept for backward compatibility
 });
 
 export async function POST(request: Request) {

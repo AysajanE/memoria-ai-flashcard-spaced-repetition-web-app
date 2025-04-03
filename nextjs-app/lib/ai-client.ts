@@ -1,10 +1,18 @@
 import { z } from "zod";
 
+// Form input validation schema (without jobId requirement)
+export const FormInputSchema = z.object({
+  text: z.string().min(1, "Text is required"),
+  model: z.enum(["gpt-4o-mini", "claude-haiku-3-5-latest"]).optional(),
+  cardType: z.enum(["qa", "cloze"]).optional(),
+  numCards: z.number().min(1).max(50).optional(),
+});
+
 // Request schema matching Python service
 export const GenerateCardsRequestSchema = z.object({
   jobId: z.string().uuid(),
   text: z.string().min(1),
-  model: z.enum(["gpt-4", "gpt-3.5-turbo", "claude-3-opus-20240229", "claude-3-sonnet-20240229"]).optional(),
+  model: z.enum(["gpt-4o-mini", "claude-haiku-3-5-latest"]).optional(),
   cardType: z.enum(["qa", "cloze"]).optional(),
   numCards: z.number().min(1).max(50).optional(),
   config: z.record(z.any()).optional(),

@@ -21,7 +21,7 @@ export default function CreatePage() {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [text, setText] = useState("");
-  const [model, setModel] = useState("gpt-4");
+  const [model, setModel] = useState("gpt-4o-mini");
   const [cardType, setCardType] = useState("qa");
   const [numCards, setNumCards] = useState("5");
   const [error, setError] = useState<string | null>(null);
@@ -123,16 +123,16 @@ export default function CreatePage() {
                   </SelectTrigger>
                   <SelectContent>
                     <div className="p-1">
-                      <SelectItem value="gpt-4" className="rounded-md focus:bg-indigo-50 dark:focus:bg-indigo-900/20">
+                      <SelectItem value="gpt-4o-mini" className="rounded-md focus:bg-indigo-50 dark:focus:bg-indigo-900/20">
                         <div className="flex items-center">
                           <div className="mr-2 h-2 w-2 rounded-full bg-green-500"></div>
-                          GPT-4 (Recommended)
+                          GPT-4o Mini (Recommended)
                         </div>
                       </SelectItem>
-                      <SelectItem value="gpt-3.5-turbo" className="rounded-md focus:bg-indigo-50 dark:focus:bg-indigo-900/20">
+                      <SelectItem value="claude-haiku-3-5-latest" className="rounded-md focus:bg-indigo-50 dark:focus:bg-indigo-900/20">
                         <div className="flex items-center">
                           <div className="mr-2 h-2 w-2 rounded-full bg-blue-500"></div>
-                          GPT-3.5 Turbo (Faster)
+                          Claude Haiku (Faster)
                         </div>
                       </SelectItem>
                     </div>

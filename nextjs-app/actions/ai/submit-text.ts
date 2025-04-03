@@ -29,7 +29,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { db } from "@/db";
 import { processingJobs } from "@/db/schema";
-import { triggerCardGeneration, GenerateCardsRequestSchema } from "@/lib/ai-client";
+import { triggerCardGeneration, FormInputSchema } from "@/lib/ai-client";
 
 export type ActionState<TData = any> = {
   isSuccess: boolean;
@@ -57,7 +57,7 @@ export async function submitTextForCardsAction(
     const cardType = formData.get("cardType") as string;
     const numCards = parseInt(formData.get("numCards") as string);
 
-    const validatedData = GenerateCardsRequestSchema.parse({
+    const validatedData = FormInputSchema.parse({
       text,
       model,
       cardType,
