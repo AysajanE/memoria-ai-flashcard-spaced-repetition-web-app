@@ -5,8 +5,8 @@
  *  Defines how the migrations are generated and applied, referencing schema definitions.
  *
  * Key points:
- *  - Points to our main schema index in ./src/db/schema/index.ts
- *  - Outputs migrations to ./src/db/migrations
+ *  - Points to our main schema index in ./db/schema/index.ts
+ *  - Outputs migrations to ./db/migrations
  *  - Loads DATABASE_URL from .env.local
  *
  * Usage:
@@ -29,8 +29,8 @@ if (!databaseUrl) {
 }
 
 export default {
-  schema: "./src/db/schema/index.ts", // Path to Drizzle schema definitions
-  out: "./src/db/migrations",         // Where new migrations will be placed
+  schema: "./db/schema/index.ts", // Path to Drizzle schema definitions
+  out: "./db/migrations",         // Where new migrations will be placed
   dialect: "postgresql",
   dbCredentials: {
     url: databaseUrl,

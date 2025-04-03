@@ -56,9 +56,8 @@ The application uses several related tables:
 - Flashcards: Store the actual cards with SRS metadata (interval, ease factor, due date)
 - Processing Jobs: Track AI processing operations
 
-The canonical schema is defined in `/nextjs-app/src/db/schema` and is accessible via:
-- Import from `@/db/schema`
-- Direct import from `/nextjs-app/src/db/schema`
+The canonical schema is defined in `/nextjs-app/db/schema` and is accessible via:
+- Direct import from `/nextjs-app/db/schema`
 
 ## Development
 

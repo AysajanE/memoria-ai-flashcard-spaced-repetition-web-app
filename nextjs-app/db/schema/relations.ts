@@ -1,22 +1,17 @@
-/**
- * @file relations.ts
- * @description
- *  Defines Drizzle 'relations' for advanced referencing between tables.
- *  Allows direct property references in queries (via drizzle-orm relations).
- */
+import { relations } from 'drizzle-orm';
+import { users } from './users';
+import { decks } from './decks';
+import { flashcards } from './flashcards';
+import { processingJobs } from './processingJobs';
 
-import { relations } from "drizzle-orm";
-import { users } from "./users";
-import { decks } from "./decks";
-import { flashcards } from "./flashcards";
-import { processingJobs } from "./processingJobs";
-
+// Define relations for the Users table
 export const usersRelations = relations(users, ({ many }) => ({
   decks: many(decks),
   flashcards: many(flashcards),
   processingJobs: many(processingJobs),
 }));
 
+// Define relations for the Decks table
 export const decksRelations = relations(decks, ({ one, many }) => ({
   user: one(users, {
     fields: [decks.userId],
@@ -25,6 +20,7 @@ export const decksRelations = relations(decks, ({ one, many }) => ({
   flashcards: many(flashcards),
 }));
 
+// Define relations for the Flashcards table
 export const flashcardsRelations = relations(flashcards, ({ one }) => ({
   user: one(users, {
     fields: [flashcards.userId],
@@ -36,9 +32,10 @@ export const flashcardsRelations = relations(flashcards, ({ one }) => ({
   }),
 }));
 
+// Define relations for the ProcessingJobs table
 export const processingJobsRelations = relations(processingJobs, ({ one }) => ({
   user: one(users, {
     fields: [processingJobs.userId],
     references: [users.id],
   }),
-}));
+})); 

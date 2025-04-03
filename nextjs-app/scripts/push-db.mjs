@@ -27,7 +27,7 @@ console.log('Pushing schema to database...');
 
 try {
   // Use the migrate function to push the schema
-  await migrate(db, { migrationsFolder: resolve(__dirname, '../src/db/migrations') });
+  await migrate(db, { migrationsFolder: resolve(__dirname, '../db/migrations') });
   console.log('Schema pushed successfully!');
 } catch (error) {
   console.error('Error pushing schema:', error);
