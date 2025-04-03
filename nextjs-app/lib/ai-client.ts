@@ -4,7 +4,7 @@ import { z } from "zod";
 export const GenerateCardsRequestSchema = z.object({
   jobId: z.string().uuid(),
   text: z.string().min(1),
-  model: z.string().optional(),
+  model: z.enum(["gpt-4", "gpt-3.5-turbo", "claude-3-opus-20240229", "claude-3-sonnet-20240229"]).optional(),
   cardType: z.enum(["qa", "cloze"]).optional(),
   numCards: z.number().min(1).max(50).optional(),
   config: z.record(z.any()).optional(),
@@ -69,9 +69,6 @@ export async function getAvailableModels(): Promise<ModelsResponse> {
   }
 }
 
-/**
- * Trigger card generation with the AI service
- */
 export async function triggerCardGeneration(payload: { 
   jobId: string; 
   text: string;
