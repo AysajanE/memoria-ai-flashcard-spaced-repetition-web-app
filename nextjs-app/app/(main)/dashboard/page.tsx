@@ -48,61 +48,81 @@ function StatsCard({ title, value, icon, trend = null, color = "indigo" }: Stats
 // Interface for RecentActivity props
 interface RecentActivityProps {
   hasActivity?: boolean;
+  activities?: ActivityItem[];
 }
 
 // --- BEGIN: Added Placeholder Type Definition ---
 interface ActivityItem {
-  id: string; // Example properties, adjust as needed later
+  id: string;
+  type: 'studied' | 'created' | 'achievement';
+  title: string;
   description: string;
   timestamp: Date;
+  icon?: React.ReactNode;
 }
 // --- END: Added Placeholder Type Definition ---
 
 
-function RecentActivity({ hasActivity = false }: RecentActivityProps) { 
-  if (!hasActivity) {
-    return (
-      <div className="flex flex-col items-center justify-center p-8 rounded-lg border border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 text-center">
-        <div className="p-3 bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 rounded-full mb-4">
-          <BookOpen size={24} />
-        </div>
-        <h4 className="font-medium text-lg mb-2">No activity yet</h4>
-        <p className="text-gray-600 dark:text-gray-400 max-w-md">
-          Start creating flashcards and studying to see your activity here. 
-          Create your first deck to begin your learning journey!
-        </p>
-        <Link 
-          href="/create" 
-          className="mt-4 px-4 py-2 bg-primary hover:bg-primary/90 text-white font-medium rounded-lg transition-all shadow-sm hover:shadow inline-flex items-center"
-        >
-          <Plus className="mr-2 h-5 w-5" />
-          Create Cards
-        </Link>
-      </div>
-    );
-  }
-
-  // For users with activity, we'd fetch real activity data here
-  // This is just a placeholder for now
- // --- BEGIN: Explicitly Typed Array ---
-  const activities: ActivityItem[] = []; 
- // --- END: Explicitly Typed Array ---
-  
-  return (
-    <div className="space-y-4">
-      {activities.length === 0 ? (
-        <div className="flex flex-col items-center justify-center p-8 rounded-lg border border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 text-center">
-          <p className="text-gray-600 dark:text-gray-400">No recent activity</p>
-        </div>
-      ) : (
-        activities.map((activity, i) => (
-          <div key={activity.id || i} className="flex items-start p-4 rounded-lg border border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900">
-            {/* Activity content would go here, e.g., <p>{activity.description}</p> */}
-          </div>
-        ))
-      )}
-    </div>
-  );
+function RecentActivity({ hasActivity = false, activities = [] }: RecentActivityProps) { 
+  if (!hasActivity) {
+    return (
+      <div className="flex flex-col items-center justify-center p-8 rounded-lg border border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 text-center">
+        <div className="p-3 bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 rounded-full mb-4">
+          <BookOpen size={24} />
+        </div>
+        <h4 className="font-medium text-lg mb-2">No activity yet</h4>
+        <p className="text-gray-600 dark:text-gray-400 max-w-md">
+          Start creating flashcards and studying to see your activity here. 
+          Create your first deck to begin your learning journey!
+        </p>
+        <Link 
+          href="/create" 
+          className="mt-4 px-4 py-2 bg-primary hover:bg-primary/90 text-white font-medium rounded-lg transition-all shadow-sm hover:shadow inline-flex items-center"
+        >
+          <Plus className="mr-2 h-5 w-5" />
+          Create Cards
+        </Link>
+      </div>
+    );
+  }
+  
+  return (
+    <div className="space-y-4">
+      {activities.length === 0 ? (
+        <div className="flex flex-col items-center justify-center p-8 rounded-lg border border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 text-center">
+          <p className="text-gray-600 dark:text-gray-400">No recent activity</p>
+        </div>
+      ) : (
+        activities.map((activity) => (
+          <div key={activity.id} className="flex items-start p-4 rounded-lg border border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900">
+            <div className="mr-4">
+              {activity.icon || (
+                activity.type === 'studied' ? <BookOpen className="text-indigo-600" size={20} /> :
+                activity.type === 'created' ? <Plus className="text-pink-600" size={20} /> :
+                <BarChart2 className="text-purple-600" size={20} />
+              )}
+            </div>
+            <div className="flex-1">
+              <div className="flex justify-between items-start">
+                <h4 className="font-medium">{activity.title}</h4>
+                <span className="text-sm text-gray-500">
+                  {activity.timestamp instanceof Date 
+                    ? new Intl.DateTimeFormat('en-US', { 
+                        day: 'numeric', 
+                        month: 'short',
+                        hour: '2-digit', 
+                        minute: '2-digit' 
+                      }).format(activity.timestamp)
+                    : ''}
+                </span>
+              </div>
+              <p className="text-gray-600 dark:text-gray-400 text-sm mt-1">{activity.description}</p>
+            </div>
+          </div>
+        ))
+      )}
+    </div>
+  );
 }
 
 
@@ -155,95 +175,124 @@ function QuickActions() {
 }
 
 export default async function DashboardPage() {
-  const statsResult = await getUserStatsAction();
-  const { userId } = await auth();
-  
-  // Get actual user decks
-  const decksResult = await getDecksAction();
-  const totalDecks = decksResult.isSuccess && decksResult.data ? decksResult.data.length : 0; // Added null check for data
-  
-  // Get actual user stats
-  const userStats = {
-    cardsReviewed: 0,
-    currentStreak: 0,
-    totalDecks: totalDecks,
-    timeStudied: "0h 0m"
-  };
-  
-  // If we have user stats, use them
-  if (statsResult.isSuccess && statsResult.data) {
-    userStats.cardsReviewed = statsResult.data.dailyCount;
-    userStats.currentStreak = statsResult.data.streak;
-  }
+  const statsResult = await getUserStatsAction();
+  const { userId } = await auth();
+  
+  // Get actual user decks
+  const decksResult = await getDecksAction();
+  const totalDecks = decksResult.isSuccess && decksResult.data ? decksResult.data.length : 0; // Added null check for data
+  
+  // Get actual user stats
+  const userStats = {
+    cardsReviewed: 0,
+    currentStreak: 0,
+    totalDecks: totalDecks,
+    timeStudied: "0h 0m"
+  };
+  
+  // If we have user stats, use them
+  if (statsResult.isSuccess && statsResult.data) {
+    userStats.cardsReviewed = statsResult.data.dailyCount;
+    userStats.currentStreak = statsResult.data.streak;
+  }
 
-  return (
-    <div className="container max-w-6xl mx-auto space-y-10 py-10">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-6">
-        <div>
-          <h1 className="text-3xl font-bold">Welcome back!</h1>
-          <p className="text-muted-foreground mt-2">
-            Continue your learning journey
-          </p>
-        </div>
-        <Link
-          href="/create"
-          className="px-5 py-2.5 bg-primary hover:bg-primary/90 text-white font-medium rounded-lg transition-all shadow-sm hover:shadow inline-flex items-center self-start sm:self-center"
-        >
-          <Plus className="mr-2 h-5 w-5" />
-          Create Cards
-        </Link>
-      </div>
+  // Fetch recent activities (mock data for now)
+  // In a real implementation, this would be an action to get activities from the database
+  const mockActivities: ActivityItem[] = [
+    {
+      id: '1',
+      type: 'studied',
+      title: 'Studied',
+      description: 'Medical Terminology - Reviewed 32 cards with 85% accuracy',
+      timestamp: new Date(Date.now() - 2 * 60 * 60 * 1000), // 2 hours ago
+    },
+    {
+      id: '2',
+      type: 'created',
+      title: 'Created deck',
+      description: 'Organic Chemistry with 45 cards',
+      timestamp: new Date(Date.now() - 24 * 60 * 60 * 1000), // Yesterday
+    },
+    {
+      id: '3',
+      type: 'achievement',
+      title: 'Achievement unlocked',
+      description: '7-Day Streak',
+      timestamp: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000), // 2 days ago
+    }
+  ];
 
-      {/* Stats Overview - Simplified */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
-        <StatsCard 
-          title="Cards Reviewed" 
-          value={userStats.cardsReviewed} 
-          color="indigo"
-          icon={<BookOpen size={18} />}
-        />
-        <StatsCard 
-          title="Current Streak" 
-          value={userStats.currentStreak} 
-          color="purple"
-          icon={<BarChart2 size={18} />}
-        />
-        <StatsCard 
-          title="Total Decks" 
-          value={userStats.totalDecks} 
-          color="pink"
-          icon={<Plus size={18} />}
-        />
-        <StatsCard 
-          title="Time Studied" 
-          value={userStats.timeStudied} 
-          color="blue"
-          icon={<Clock size={18} />}
-        />
-      </div>
-      
-      {/* Quick Actions - Simplified */}
-      <section>
-        <h2 className="text-xl font-semibold mb-5">Quick Actions</h2>
-        <QuickActions />
-      </section>
+  return (
+    <div className="container max-w-6xl mx-auto space-y-10 py-10">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-6">
+        <div>
+          <h1 className="text-3xl font-bold">Welcome back!</h1>
+          <p className="text-muted-foreground mt-2">
+            Continue your learning journey
+          </p>
+        </div>
+        <Link
+          href="/create"
+          className="px-5 py-2.5 bg-primary hover:bg-primary/90 text-white font-medium rounded-lg transition-all shadow-sm hover:shadow inline-flex items-center self-start sm:self-center"
+        >
+          <Plus className="mr-2 h-5 w-5" />
+          Create Cards
+        </Link>
+      </div>
 
-      {/* Recent Activity - Simplified */}
-      <section className="pt-4">
-        <div className="flex items-center justify-between mb-5">
-          <h2 className="text-xl font-semibold">Recent Activity</h2>
-          {totalDecks > 0 && (
-            <Link 
-              href="/progress" 
-              className="text-sm font-medium text-primary hover:text-primary/80 flex items-center"
-            >
-              View all
-              <ArrowUpRight className="ml-1 h-4 w-4" />
-            </Link>
-          )}
-        </div>
-        <RecentActivity hasActivity={totalDecks > 0} />
-      </section>
-    </div>
-  );
+      {/* Stats Overview - Fixed grid layout */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+        <StatsCard 
+          title="Cards Reviewed" 
+          value={userStats.cardsReviewed} 
+          color="indigo"
+          icon={<BookOpen size={18} />}
+        />
+        <StatsCard 
+          title="Current Streak" 
+          value={userStats.currentStreak} 
+          color="purple"
+          icon={<BarChart2 size={18} />}
+        />
+        <StatsCard 
+          title="Total Decks" 
+          value={userStats.totalDecks} 
+          color="pink"
+          icon={<Plus size={18} />}
+        />
+        <StatsCard 
+          title="Time Studied" 
+          value={userStats.timeStudied} 
+          color="blue"
+          icon={<Clock size={18} />}
+        />
+      </div>
+      
+      {/* Quick Actions - Simplified */}
+      <section>
+        <h2 className="text-xl font-semibold mb-5">Quick Actions</h2>
+        <QuickActions />
+      </section>
+
+      {/* Recent Activity - Now with mock data */}
+      <section className="pt-4">
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="text-xl font-semibold">Recent Activity</h2>
+          {totalDecks > 0 && (
+            <Link 
+              href="/progress" 
+              className="text-sm font-medium text-primary hover:text-primary/80 flex items-center"
+            >
+              View all
+              <ArrowUpRight className="ml-1 h-4 w-4" />
+            </Link>
+          )}
+        </div>
+        <RecentActivity 
+          hasActivity={totalDecks > 0} 
+          activities={mockActivities}
+        />
+      </section>
+    </div>
+  );
 }
