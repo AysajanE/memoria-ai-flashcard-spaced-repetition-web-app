@@ -45,7 +45,7 @@ export async function POST(req: Request) {
 
     // Get the primary email address
     const primaryEmail = email_addresses.find(
-      (email) => email.primary
+      (email) => email.id === email_addresses[0].id
     )?.email_address;
     if (!primaryEmail) {
       console.error("No primary email found for user:", id);

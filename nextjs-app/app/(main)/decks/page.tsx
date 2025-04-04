@@ -22,12 +22,12 @@ export default function DecksPage() {
         const result = await getDecksAction();
 
         if (!result.isSuccess) {
-          setError(result.message);
+          setError(result.message ?? "Failed to load decks");
           toast.error(result.message || "Failed to load decks");
           return;
         }
 
-        setDecks(result.data);
+        setDecks(result.data ?? []);
       } catch (err) {
         setError("Failed to load decks");
         toast.error("Failed to load decks");

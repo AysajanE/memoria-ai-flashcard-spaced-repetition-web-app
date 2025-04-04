@@ -1,21 +1,10 @@
 /**
  * @file decks.ts
  * @description
- *  Provides server actions related to Deck management in Memoria. 
- *  This includes fetching the user's decks, creating new decks, and 
- *  the critical "reviewCardsAction" that saves AI-generated flashcards 
+ *  Provides server actions related to Deck management in Memoria.
+ *  This includes fetching the user's decks, creating new decks, and
+ *  the critical "reviewCardsAction" that saves AI-generated flashcards
  *  to the selected deck after the user approves them.
- *
- * @dependencies
- *  - Drizzle ORM for database interaction
- *  - Clerk for user authentication (auth())
- *  - Zod for input validation
- *
- * @notes
- *  - We renamed "saveJobFlashcardsAction" to "reviewCardsAction" to match 
- *    the plan's wording. This function is responsible for the final step 
- *    of assigning approved flashcards to a deck once the user confirms 
- *    or creates a new deck in the ApproveDialog.
  */
 
 "use server";
@@ -23,7 +12,7 @@
 import { auth } from "@clerk/nextjs";
 import { db } from "@/db";
 import { decks, flashcards, processingJobs, users } from "@/db/schema";
-import { eq, sql, inArray } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { ActionState } from "@/types";
 import { Deck } from "@/types";
 import { z } from "zod";
@@ -70,8 +59,7 @@ export async function getDecksAction(): Promise<ActionState<Deck[]>> {
 
 // -------------- CREATE DECK ACTION --------------
 /**
- * Zod schema for creating a deck. 
- * We limit name length to 100 as a basic constraint.
+ * Zod schema for creating a deck.
  */
 const CreateDeckSchema = z.object({
   name: z
@@ -88,9 +76,6 @@ const CreateDeckSchema = z.object({
  *
  * @param name The user-provided deck name (validated by Zod).
  * @returns {Promise<ActionState<{ deckId: string }>>}
- *  isSuccess: Whether the creation succeeded.
- *  data.deckId: The new deck's ID if created successfully.
- *  message: Optional status or error info.
  */
 export async function createDeckAction(
   name: string
@@ -126,7 +111,6 @@ export async function createDeckAction(
 
     if (error instanceof z.ZodError) {
       const cleanFieldErrors: Record<string, string[]> = {};
-
       Object.entries(error.formErrors.fieldErrors).forEach(([key, value]) => {
         if (value !== undefined) {
           cleanFieldErrors[key] = value;
@@ -152,16 +136,14 @@ export async function createDeckAction(
  * @function reviewCardsAction
  * @async
  * @description
- *  Called after the user clicks "Approve & Assign" in the flashcard generation 
- *  flow. Retrieves the completed AI job from the DB (must be status='completed'), 
+ *  Called after the user clicks "Approve & Assign" in the flashcard generation
+ *  flow. Retrieves the completed AI job from the DB (must be status='completed'),
  *  extracts the cards, and saves them into a user-chosen or newly created deck.
  *
- * @param jobId The ID of the AI processing job
- * @param deckNameOrId Either an existing deckId or a string representing a new deck name
- * @param isExistingDeck If true, we interpret deckNameOrId as an existing deck's ID. Otherwise, it's a new deck name.
+ * @param jobId The ID of the AI processing job.
+ * @param deckNameOrId Either an existing deck ID or a string representing a new deck name.
+ * @param isExistingDeck If true, interpret deckNameOrId as an existing deck's ID.
  * @returns {Promise<ActionState<{ deckId: string }>>}
- *  isSuccess: true if the flashcards were saved successfully.
- *  data.deckId: the deck to which the flashcards were assigned.
  */
 export async function reviewCardsAction(
   jobId: string,
@@ -210,8 +192,7 @@ export async function reviewCardsAction(
       };
     }
 
-    // Expect the AI result payload to contain "cards" 
-    // which is an array of { front, back, type }
+    // Expect the AI result payload to contain "cards" which is an array of { front, back, type }
     type GeneratedCard = {
       front: string;
       back: string;
@@ -229,7 +210,6 @@ export async function reviewCardsAction(
       };
     }
 
-    // If the user wants to use an existing deck
     if (isExistingDeck) {
       // Verify the deck exists and belongs to the user
       const existingDeck = await db.query.decks.findFirst({
@@ -252,19 +232,18 @@ export async function reviewCardsAction(
         };
       }
 
-      // Add the cards to the existing deck
+      // Insert cards into the existing deck.
       await db.insert(flashcards).values(
         cards.map((card) => ({
           deckId: existingDeck.id,
           userId,
           front: card.front,
           back: card.back,
-          cardType: (card.type === "cloze" ? "cloze" : "qa"),
-          // Set default SRS values
+          cardType: (card.type === "cloze" ? "cloze" : "qa") as "qa" | "cloze",
           srsLevel: 0,
           srsInterval: 0,
           srsDueDate: new Date(),
-          srsEaseFactor: 2.5,
+          srsEaseFactor: "2.50",
         }))
       );
 
@@ -274,8 +253,7 @@ export async function reviewCardsAction(
         data: { deckId: existingDeck.id },
       };
     } else {
-      // User wants to create a new deck
-      // Validate new deck name
+      // User wants to create a new deck.
       const validatedName = CreateDeckSchema.safeParse({ name: deckNameOrId });
       if (!validatedName.success) {
         return {
@@ -285,7 +263,7 @@ export async function reviewCardsAction(
         };
       }
 
-      // Create new deck
+      // Create a new deck.
       const [newDeck] = await db
         .insert(decks)
         .values({
@@ -294,19 +272,18 @@ export async function reviewCardsAction(
         })
         .returning({ id: decks.id, name: decks.name });
 
-      // Add cards to new deck
+      // Insert cards into the new deck.
       await db.insert(flashcards).values(
         cards.map((card) => ({
           deckId: newDeck.id,
           userId,
           front: card.front,
           back: card.back,
-          cardType: (card.type === "cloze" ? "cloze" : "qa"),
-          // Set default SRS values
+          cardType: (card.type === "cloze" ? "cloze" : "qa") as "qa" | "cloze",
           srsLevel: 0,
           srsInterval: 0,
           srsDueDate: new Date(),
-          srsEaseFactor: 2.5,
+          srsEaseFactor: "2.50",
         }))
       );
 
@@ -322,69 +299,6 @@ export async function reviewCardsAction(
       isSuccess: false,
       message: "Failed to save flashcards",
       error: { save: ["An unexpected error occurred"] },
-    };
-  }
-}
-
-/**
- * @function getDecksWithCardCountsAction
- * @async
- * @description
- *  Fetches all decks belonging to the current user with a count of flashcards in each deck.
- *
- * @returns {Promise<ActionState<(Deck & { cardCount: number })[]>>}
- *  isSuccess: Whether the operation succeeded.
- *  data: Array of Deck objects with cardCount property if successful.
- *  message: Error message if any issue arises.
- */
-export async function getDecksWithCardCountsAction(): Promise<ActionState<Array<Deck & { cardCount: number }>>> {
-  try {
-    const { userId } = auth();
-    if (!userId) {
-      return {
-        isSuccess: false,
-        message: "Unauthorized",
-      };
-    }
-
-    // Query all decks for the current user
-    const userDecks = await db
-      .select()
-      .from(decks)
-      .where(eq(decks.userId, userId));
-    
-    // Return early if no decks
-    if (userDecks.length === 0) {
-      return {
-        isSuccess: true,
-        data: [],
-      };
-    }
-
-    // For each deck, count cards in a separate query (simpler approach)
-    const decksWithCounts = await Promise.all(
-      userDecks.map(async (deck) => {
-        const count = await db
-          .select({ count: sql`count(*)` })
-          .from(flashcards)
-          .where(eq(flashcards.deckId, deck.id));
-        
-        return {
-          ...deck,
-          cardCount: Number(count[0]?.count || 0),
-        };
-      })
-    );
-
-    return {
-      isSuccess: true,
-      data: decksWithCounts,
-    };
-  } catch (error) {
-    console.error("Error fetching decks with card counts:", error);
-    return {
-      isSuccess: false,
-      message: "Failed to fetch decks",
     };
   }
 }

@@ -1,48 +1,49 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * @file index.ts
  * @description
- *  This file contains server actions related to AI job submission and retrieval in the Next.js app.
- *  Notably, it defines `submitAiJobAction` which orchestrates job creation and notifies
- *  the Python AI service to start the asynchronous flashcard-generation process.
- *  - submitAiJobAction: Orchestrates creation of a processing job and triggers the AI service
- *  - getJobStatusAction: Retrieves the current status/results of a processing job
- *  - listPendingJobsAction: Debug utility to list all pending jobs for the logged-in user
- *  
+ * This file contains server actions related to AI job submission and retrieval in the Next.js app.
+ * Notably, it defines `submitAiJobAction` which orchestrates job creation and notifies
+ * the Python AI service to start the asynchronous flashcard-generation process.
+ * - submitAiJobAction: Orchestrates creation of a processing job and triggers the AI service
+ * - getJobStatusAction: Retrieves the current status/results of a processing job
+ * - listPendingJobsAction: Debug utility to list all pending jobs for the logged-in user
+ *
  * Key Responsibilities:
- *  - Submit new AI job requests (create DB record, call AI service)
- *  - Provide job status endpoints (via other server actions or routes)
+ * - Submit new AI job requests (create DB record, call AI service)
+ * - Provide job status endpoints (via other server actions or routes)
  *
  * Important Considerations:
- *  - We do NOT update job status to "processing" or "completed" here.
- *    The Python AI service calls our webhook when it actually starts/finishes the job.
- *  - We catch any immediate errors (network or validation) in calling the AI service
- *    and mark the job as "failed" so the user sees an error right away.
- *  - We rely on Clerk for user authentication: must call auth() to check userId.
- * 
+ * - We do NOT update job status to "processing" or "completed" here.
+ * The Python AI service calls our webhook when it actually starts/finishes the job.
+ * - We catch any immediate errors (network or validation) in calling the AI service
+ * and mark the job as "failed" so the user sees an error right away.
+ * - We rely on Clerk for user authentication: must call auth() to check userId.
+ *
  * @dependencies
- *  - Drizzle ORM (db, processingJobs schema, users schema)
- *  - Clerk auth()
- *  - ActionState type from our shared types
- *  - Our AI service client (triggerCardGeneration)
- * 
+ * - Drizzle ORM (db, processingJobs schema, users schema)
+ * - Clerk auth()
+ * - ActionState type from our shared types
+ * - Our AI service client (triggerCardGeneration)
+ *
  * @notes
- *  - We removed repeated user creation logic that used to check if a user existed in DB and create them if not.
- *    Now we rely solely on the Clerk webhook or other mechanisms to ensure the DB has a record for each user.
- *  - Always ensure user is authenticated (userId must exist). Return an error if not.
- *  - This file includes multiple server actions, all of which must return a Promise<ActionState<T>>.
- *   - The job is created with `status = 'pending'`.
- *   - We call the AI service but do not set `status = 'processing'`.
- *   - If the AI service call fails (can't connect, etc.), we set `status = 'failed'`.
- *   - Otherwise, the job stays "pending" until the AI service updates it via our webhook.
+ * - We removed repeated user creation logic that used to check if a user existed in DB and create them if not.
+ * Now we rely solely on the Clerk webhook or other mechanisms to ensure the DB has a record for each user.
+ * - Always ensure user is authenticated (userId must exist). Return an error if not.
+ * - This file includes multiple server actions, all of which must return a Promise<ActionState<T>>.
+ * - The job is created with `status = 'pending'`.
+ * - We call the AI service but do not set `status = 'processing'`.
+ * - If the AI service call fails (can't connect, etc.), we set `status = 'failed'`.
+ * - Otherwise, the job stays "pending" until the AI service updates it via our webhook.
  */
 
 "use server";
 
 import { auth } from "@clerk/nextjs";
 import { db } from "@/db";
-import { ActionState } from "@/types";
+import { ActionState } from "@/types"; // Ensure ActionState type definition includes 'error?: Record<string, string[]> | null'
 import { processingJobs } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { z } from "zod";
 import { triggerCardGeneration } from "@/lib/ai-client";
 
@@ -53,7 +54,7 @@ import { triggerCardGeneration } from "@/lib/ai-client";
  * - documentId: (optional) if referencing an uploaded document
  */
 const SubmitJobSchema = z.object({
-  jobType: z.enum(["summarize", "generate-prompts"]).optional(), // For demonstration
+  jobType: z.enum(["summarize", "generate-prompts", "generate-cards"]).optional(), // Updated to include generate-cards
   inputPayload: z.object({
     text: z.string().min(1, "Text is required"),
   }),
@@ -64,16 +65,16 @@ const SubmitJobSchema = z.object({
  * @function submitAiJobAction
  * @async
  * @description
- *  Creates a new AI job record in the `processingJobs` table with status "pending"
- *  and triggers the Python AI service via an HTTP POST, returning immediately.
- *  If the AI service call fails (e.g., network error), we mark the job as "failed" right away.
+ * Creates a new AI job record in the `processingJobs` table with status "pending"
+ * and triggers the Python AI service via an HTTP POST, returning immediately.
+ * If the AI service call fails (e.g., network error), we mark the job as "failed" right away.
  *
  * @param input Partial user input for job submission, validated by zod
  * @returns {Promise<ActionState<{ jobId: string; inputText: string }>>}
- *  - isSuccess: whether the job was successfully created and the request to AI was started
- *  - data: includes the created `jobId` and the `inputText`
- *  - message: success/error message
- *  - error: any field validation errors
+ * - isSuccess: whether the job was successfully created and the request to AI was started
+ * - data: includes the created `jobId` and the `inputText`
+ * - message: success/error message
+ * - error: any field validation errors
  */
 export async function submitAiJobAction(
   input: unknown
@@ -99,7 +100,8 @@ export async function submitAiJobAction(
     }
 
     // Extract validated fields
-    const { jobType = "summarize", inputPayload, documentId } = parsed.data;
+    // Default to 'generate-cards' if jobType is not provided or invalid
+    const { jobType = "generate-cards", inputPayload, documentId } = parsed.data;
     const userInputText = inputPayload.text;
 
     // 1) Create a job record in DB with status = 'pending'
@@ -109,11 +111,11 @@ export async function submitAiJobAction(
         .insert(processingJobs)
         .values({
           userId: userId,
-          jobType: "generate-cards", // Hardcode to 'generate-cards', or dynamic if needed
+          jobType: jobType, // Use validated or default job type
           status: "pending",
           inputPayload: {
             text: userInputText,
-            requestedJobType: jobType,
+            requestedJobType: jobType, // Store the requested job type if needed
             documentId,
           },
         })
@@ -132,7 +134,8 @@ export async function submitAiJobAction(
       await triggerCardGeneration({
         jobId: createdJob.id, // We pass the newly created job's ID
         text: userInputText,
-        // Model, cardType, etc. can be expanded based on jobType or other logic
+        cardType: jobType === "generate-cards" ? "qa" : undefined, // Pass cardType only if relevant
+        // Model, etc. can be expanded based on jobType or other logic
       });
 
       // We do NOT mark job as "processing" here. The AI service will do that
@@ -165,6 +168,7 @@ export async function submitAiJobAction(
       return {
         isSuccess: false,
         message: "Failed to process with AI service",
+        // You could optionally add an error field here too, e.g., error: { api: ["AI service unreachable"] }
       };
     }
   } catch (error) {
@@ -173,6 +177,7 @@ export async function submitAiJobAction(
       isSuccess: false,
       message:
         error instanceof Error ? error.message : "Error submitting AI job",
+      // General error: error: { server: ["Unexpected error submitting job"] }
     };
   }
 }
@@ -181,8 +186,8 @@ export async function submitAiJobAction(
  * @function listPendingJobsAction
  * @async
  * @description
- *  Utility action that lists all pending jobs for the current user.
- *  Useful for debugging or listing queued tasks in a dashboard.
+ * Utility action that lists all pending jobs for the current user.
+ * Useful for debugging or listing queued tasks in a dashboard.
  *
  * @returns Promise<ActionState<Array<{id: string, status: string, createdAt: Date}>>>
  */
@@ -226,14 +231,14 @@ export async function listPendingJobsAction(): Promise<
  * @function getJobStatusAction
  * @async
  * @description
- *  Retrieves the current status/results of a processing job.
+ * Retrieves the current status/results of a processing job.
  *
  * @param jobId The ID of the job to retrieve status for
  * @returns Promise<ActionState<{ status: string; results: any }>>
- *  - isSuccess: whether the job status was successfully retrieved
- *  - data: includes the job status and results
- *  - message: success/error message
- *  - error: any field validation errors
+ * - isSuccess: whether the job status was successfully retrieved
+ * - data: includes the job status and results payload (as 'results')
+ * - message: success/error message
+ * - error: any field validation errors
  */
 export async function getJobStatusAction(
   jobId: string
@@ -247,37 +252,45 @@ export async function getJobStatusAction(
       };
     }
 
-    // Validate job ID
-    const parsed = z.string().safeParse(jobId);
+    // Validate job ID - Check if it's a non-empty string
+    const parsed = z.string().min(1, "Job ID cannot be empty").safeParse(jobId);
     if (!parsed.success) {
       return {
         isSuccess: false,
         message: "Invalid job ID",
-        error: parsed.error.flatten().fieldErrors,
+        error: { jobId: parsed.error.flatten().formErrors },
       };
     }
 
-    // Retrieve job status from DB
+    // Retrieve job status from DB, ensuring user ownership
     const job = await db.query.processingJobs.findFirst({
-      where: eq(processingJobs.id, parsed.data),
+      where: and(eq(processingJobs.id, parsed.data), eq(processingJobs.userId, userId)),
       columns: {
         status: true,
-        results: true,
+        resultPayload: true, // **FIX:** Changed 'results' to 'resultPayload'
+        errorMessage: true,
+        errorDetail: true,
+        jobType: true,
+        createdAt: true,
+        updatedAt: true,
       },
     });
 
     if (!job) {
       return {
         isSuccess: false,
-        message: "Job not found",
+        message: "Job not found or unauthorized",
+        error: { auth: ["Permission denied or job does not exist"] },
       };
     }
 
+
+    // Return data with the correct structure expected by ActionState<...>
     return {
       isSuccess: true,
       data: {
         status: job.status,
-        results: job.results,
+        results: job.resultPayload, // **FIX:** Assign resultPayload to the 'results' key for the return type
       },
       message: "Job status retrieved successfully",
     };
@@ -286,6 +299,7 @@ export async function getJobStatusAction(
     return {
       isSuccess: false,
       message: "Failed to retrieve job status",
+      error: { server: ["An unexpected error occurred"] },
     };
   }
 }

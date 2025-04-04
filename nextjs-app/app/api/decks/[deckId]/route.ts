@@ -1,9 +1,13 @@
+// File: nextjs-app/app/api/decks/[deckId]/route.ts
+
 import { auth } from "@clerk/nextjs";
 import { db } from "@/db";
-import { decks } from "@/db/schema";
+// Corrected import paths assuming schema files are directly under db/schema
+import { decks } from "@/db/schema/decks"; 
+import { flashcards } from "@/db/schema/flashcards"; 
 import { eq, and, count } from "drizzle-orm";
 import { NextResponse } from "next/server";
-import { flashcards } from "@/db/schema";
+
 
 export async function GET(
   request: Request,
@@ -29,16 +33,25 @@ export async function GET(
     // Get the deck with card count
     const result = await db
       .select({
-        ...decks,
-        cardCount: count(flashcards.id),
+        deck: decks, // Select the whole decks table under the 'deck' key
+        cardCount: count(flashcards.id), // Select the count
       })
       .from(decks)
       .leftJoin(flashcards, eq(flashcards.deckId, decks.id))
       .where(and(
-        eq(decks.id, deckId),
+        eq(decks.id, deckId), 
         eq(decks.userId, userId)
       ))
-      .groupBy(decks.id);
+      .groupBy(
+        decks.id, 
+        decks.userId, 
+        decks.name, 
+        decks.createdAt, 
+        decks.updatedAt 
+        // Group by all selected non-aggregated columns from 'decks'
+      ); 
+      // Note: Added groupBy for all selected deck columns, which is usually required 
+      // by PostgreSQL when using aggregates like count() without selecting ONLY aggregates.
 
     if (!result || result.length === 0) {
       return NextResponse.json(
@@ -47,7 +60,10 @@ export async function GET(
       );
     }
 
-    return NextResponse.json(result[0]);
+    // Return the first result (should be unique by ID)
+    // The structure is now { deck: { id, name, ... }, cardCount: number }
+    return NextResponse.json(result[0]); 
+
   } catch (error) {
     console.error("Error fetching deck:", error);
     return NextResponse.json(
@@ -55,4 +71,4 @@ export async function GET(
       { status: 500 }
     );
   }
-} 
+}

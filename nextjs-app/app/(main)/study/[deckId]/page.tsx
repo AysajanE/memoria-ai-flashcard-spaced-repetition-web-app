@@ -32,13 +32,13 @@ export default function StudyPage({ params }: { params: { deckId: string } }) {
         const result = await getDeckStudySessionAction(params.deckId);
 
         if (!result.isSuccess) {
-          setError(result.message);
+          setError(result.message ?? "Failed to load study session");
           toast.error(result.message || "Failed to load study session");
           return;
         }
 
-        setDeckName(result.data.deckName);
-        setStudyCards(result.data.cards);
+        setDeckName(result.data?.deckName ?? "");
+        setStudyCards(result.data?.cards ?? []);
         setCurrentCardIndex(0);
         setIsShowingAnswer(false);
       } catch (err) {
@@ -60,7 +60,7 @@ export default function StudyPage({ params }: { params: { deckId: string } }) {
     try {
       const result = await recordStudyRatingAction(
         studyCards[currentCardIndex].id,
-        rating
+        rating as "Again" | "Hard" | "Good" | "Easy"
       );
 
       if (!result.isSuccess) {

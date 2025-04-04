@@ -90,7 +90,7 @@ export default function JobStatusPage({ params }: { params: { jobId: string } })
 
   // Polling for job status
   useEffect(() => {
-    let intervalId: NodeJS.Timer | null = null;
+    let intervalId: NodeJS.Timeout | null = null;
 
     async function fetchJobStatus() {
       try {

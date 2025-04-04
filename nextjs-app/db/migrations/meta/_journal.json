@@ -22,6 +22,13 @@
       "when": 1743460445566,
       "tag": "0002_remarkable_skrulls",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1743709607458,
+      "tag": "0003_wakeful_stature",
+      "breakpoints": true
     }
   ]
 }

@@ -1,4 +1,4 @@
-import { Flashcard } from "@/db/schema";
+import { flashcards } from "@/db/schema/flashcards";
 
 export type StudyRating = "Again" | "Hard" | "Good" | "Easy";
 
@@ -44,7 +44,7 @@ interface SrsData {
  * - Learning phase has fixed intervals for better initial retention
  */
 export function calculateSrsData(
-  currentCard: Flashcard,
+  currentCard: typeof flashcards.$inferSelect,
   rating: StudyRating
 ): SrsData {
   const currentInterval = currentCard.srsInterval;
