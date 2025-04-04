@@ -2,7 +2,7 @@
 
 import { auth } from "@clerk/nextjs";
 import { db } from "@/db";
-// Corrected import paths assuming schema files are directly under db/schema
+// Use individual schema imports to avoid TypeScript errors
 import { decks } from "@/db/schema/decks"; 
 import { flashcards } from "@/db/schema/flashcards"; 
 import { eq, and, count } from "drizzle-orm";
@@ -67,7 +67,7 @@ export async function GET(
   } catch (error) {
     console.error("Error fetching deck:", error);
     return NextResponse.json(
-      { error: "Failed to fetch deck" },
+      { error: "Failed to fetch deck info" },
       { status: 500 }
     );
   }

@@ -1,7 +1,8 @@
 import { auth } from "@clerk/nextjs";
 import { db } from "@/db";
-import { decks, flashcards } from "@/db/schema";
-import { eq, and } from "drizzle-orm";
+import { decks } from "@/db/schema/decks";
+import { flashcards } from "@/db/schema/flashcards";
+import { eq, and, count } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
 export async function GET(
@@ -49,7 +50,11 @@ export async function GET(
       orderBy: (flashcards, { asc }) => [asc(flashcards.createdAt)]
     });
 
-    return NextResponse.json(cards);
+    // Include count in the response
+    return NextResponse.json({
+      cards,
+      count: cards.length
+    });
   } catch (error) {
     console.error("Error fetching flashcards:", error);
     return NextResponse.json(

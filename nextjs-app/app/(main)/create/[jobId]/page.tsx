@@ -194,8 +194,8 @@ export default function JobStatusPage({ params }: { params: { jobId: string } })
         if (response.isSuccess) {
           toast.success("Flashcards saved successfully!");
           setIsDialogOpen(false);
-          // If we used an existing deckId, go to it. Otherwise, also go to that deck.
-          router.push(`/study/${response.data?.deckId}`);
+          // Redirect to decks page instead of study page
+          router.push(`/decks`);
         } else {
           toast.error(response.message || "Failed to save flashcards");
           setDialogError(response.message || "Failed to save flashcards");

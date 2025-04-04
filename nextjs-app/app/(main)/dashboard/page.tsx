@@ -129,49 +129,49 @@ function RecentActivity({ hasActivity = false, activities = [] }: RecentActivity
 // ... rest of the DashboardPage component ...
 
 function QuickActions() {
-  return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-      <Link 
-        href="/create" 
-        className="flex flex-col items-center justify-center p-6 bg-white dark:bg-gray-900 rounded-xl text-center border border-gray-100 dark:border-gray-800 hover:shadow-sm transition-all group"
-      >
-        <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center mb-4">
-          <Plus className="text-primary h-5 w-5" />
-        </div>
-        <h3 className="font-medium">Create Cards</h3>
-      </Link>
-      
-      <Link 
-        href="/decks" 
-        className="flex flex-col items-center justify-center p-6 bg-white dark:bg-gray-900 rounded-xl text-center border border-gray-100 dark:border-gray-800 hover:shadow-sm transition-all group"
-      >
-        <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center mb-4">
-          <BookOpen className="text-primary h-5 w-5" />
-        </div>
-        <h3 className="font-medium">My Decks</h3>
-      </Link>
-      
-      <Link 
-        href="/study" 
-        className="flex flex-col items-center justify-center p-6 bg-white dark:bg-gray-900 rounded-xl text-center border border-gray-100 dark:border-gray-800 hover:shadow-sm transition-all group"
-      >
-        <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center mb-4">
-          <Brain className="text-primary h-5 w-5" />
-        </div>
-        <h3 className="font-medium">Study</h3>
-      </Link>
-      
-      <Link 
-        href="/articles" 
-        className="flex flex-col items-center justify-center p-6 bg-white dark:bg-gray-900 rounded-xl text-center border border-gray-100 dark:border-gray-800 hover:shadow-sm transition-all group"
-      >
-        <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center mb-4">
-          <ArrowUpRight className="text-primary h-5 w-5" />
-        </div>
-        <h3 className="font-medium">Articles</h3>
-      </Link>
-    </div>
-  );
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+      <Link 
+        href="/create" 
+        className="flex flex-col items-center justify-center p-6 bg-white dark:bg-gray-900 rounded-xl text-center border border-gray-100 dark:border-gray-800 hover:shadow-sm transition-all group"
+      >
+        <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center mb-4">
+          <Plus className="text-primary h-6 w-6" />
+        </div>
+        <h3 className="font-medium">Create Cards</h3>
+      </Link>
+      
+      <Link 
+        href="/decks" 
+        className="flex flex-col items-center justify-center p-6 bg-white dark:bg-gray-900 rounded-xl text-center border border-gray-100 dark:border-gray-800 hover:shadow-sm transition-all group"
+      >
+        <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center mb-4">
+          <BookOpen className="text-primary h-6 w-6" />
+        </div>
+        <h3 className="font-medium">My Decks</h3>
+      </Link>
+      
+      <Link 
+        href="/study" 
+        className="flex flex-col items-center justify-center p-6 bg-white dark:bg-gray-900 rounded-xl text-center border border-gray-100 dark:border-gray-800 hover:shadow-sm transition-all group"
+      >
+        <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center mb-4">
+          <Brain className="text-primary h-6 w-6" />
+        </div>
+        <h3 className="font-medium">Study</h3>
+      </Link>
+      
+      <Link 
+        href="/articles" 
+        className="flex flex-col items-center justify-center p-6 bg-white dark:bg-gray-900 rounded-xl text-center border border-gray-100 dark:border-gray-800 hover:shadow-sm transition-all group"
+      >
+        <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center mb-4">
+          <ArrowUpRight className="text-primary h-6 w-6" />
+        </div>
+        <h3 className="font-medium">Articles</h3>
+      </Link>
+    </div>
+  );
 }
 
 export default async function DashboardPage() {
@@ -196,31 +196,9 @@ export default async function DashboardPage() {
     userStats.currentStreak = statsResult.data.streak;
   }
 
-  // Fetch recent activities (mock data for now)
-  // In a real implementation, this would be an action to get activities from the database
-  const mockActivities: ActivityItem[] = [
-    {
-      id: '1',
-      type: 'studied',
-      title: 'Studied',
-      description: 'Medical Terminology - Reviewed 32 cards with 85% accuracy',
-      timestamp: new Date(Date.now() - 2 * 60 * 60 * 1000), // 2 hours ago
-    },
-    {
-      id: '2',
-      type: 'created',
-      title: 'Created deck',
-      description: 'Organic Chemistry with 45 cards',
-      timestamp: new Date(Date.now() - 24 * 60 * 60 * 1000), // Yesterday
-    },
-    {
-      id: '3',
-      type: 'achievement',
-      title: 'Achievement unlocked',
-      description: '7-Day Streak',
-      timestamp: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000), // 2 days ago
-    }
-  ];
+  // No mock activities - will need an action to get real activity data in future
+  // Temporarily use an empty array
+  const activities: ActivityItem[] = [];
 
   return (
     <div className="container max-w-6xl mx-auto space-y-10 py-10">
@@ -246,35 +224,35 @@ export default async function DashboardPage() {
           title="Cards Reviewed" 
           value={userStats.cardsReviewed} 
           color="indigo"
-          icon={<BookOpen size={18} />}
+          icon={<BookOpen size={20} />}
         />
         <StatsCard 
           title="Current Streak" 
           value={userStats.currentStreak} 
           color="purple"
-          icon={<BarChart2 size={18} />}
+          icon={<BarChart2 size={20} />}
         />
         <StatsCard 
           title="Total Decks" 
           value={userStats.totalDecks} 
           color="pink"
-          icon={<Plus size={18} />}
+          icon={<Plus size={20} />}
         />
         <StatsCard 
           title="Time Studied" 
           value={userStats.timeStudied} 
           color="blue"
-          icon={<Clock size={18} />}
+          icon={<Clock size={20} />}
         />
       </div>
       
-      {/* Quick Actions - Simplified */}
+      {/* Quick Actions - Improved */}
       <section>
         <h2 className="text-xl font-semibold mb-5">Quick Actions</h2>
         <QuickActions />
       </section>
 
-      {/* Recent Activity - Now with mock data */}
+      {/* Recent Activity - No mock data */}
       <section className="pt-4">
         <div className="flex items-center justify-between mb-5">
           <h2 className="text-xl font-semibold">Recent Activity</h2>
@@ -290,7 +268,7 @@ export default async function DashboardPage() {
         </div>
         <RecentActivity 
           hasActivity={totalDecks > 0} 
-          activities={mockActivities}
+          activities={activities}
         />
       </section>
     </div>

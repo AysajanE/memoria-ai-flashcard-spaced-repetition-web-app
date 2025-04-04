@@ -39,6 +39,7 @@ export async function getDecksAction(): Promise<ActionState<Deck[]>> {
       };
     }
 
+    // Get all decks for the user
     const userDecks = await db
       .select()
       .from(decks)
