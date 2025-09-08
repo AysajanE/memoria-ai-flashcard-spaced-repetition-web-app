@@ -11,12 +11,10 @@ This is the AI service component of the Memoria flashcard application. It handle
 
 ## AI Models
 
-The service is configured to use the following default models:
+Defaults (configurable via `.env.local`):
 
-- **OpenAI**: `gpt-4o-mini` - A cost-effective model with excellent performance
-- **Anthropic**: `claude-3-haiku` - A fast, efficient model suitable for most tasks
-
-These can be changed in the `.env.local` file.
+- OpenAI: `gpt-4o-mini`
+- Anthropic: `claude-haiku-3-5-latest`
 
 ## Configuration
 
@@ -47,7 +45,7 @@ Triggers flashcard generation for a given text input.
 
 ### `/api/v1/available-models`
 
-Returns information about available AI models.
+Returns information about available AI models. Protected with `X-Internal-API-Key`.
 
 **Response:**
 ```json
@@ -84,6 +82,11 @@ pip install -r requirements.txt
 # Run the server
 uvicorn app.main:app --reload
 ```
+
+### CORS & Webhook Security
+
+- CORS: Set `CORS_ORIGINS` in `.env.local` to a list of trusted origins. When using wildcard (`*`), credentials are disabled automatically.
+- Webhook HMAC: Set `INTERNAL_WEBHOOK_HMAC_SECRET` to sign outgoing webhooks to Next.js. Next.js verifies timestamp + signature.
 
 ### Adding New Models
 
