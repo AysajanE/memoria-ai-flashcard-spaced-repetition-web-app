@@ -2,19 +2,19 @@ import logging
 import asyncio
 from typing import Optional
 
-import openai
 from openai import AsyncOpenAI
-# Updated imports for OpenAI v1.x
+# Updated imports for OpenAI v1.x (aliased to avoid collisions)
 from openai import (
     APITimeoutError,
-    RateLimitError,
+    RateLimitError as OpenAIRateLimitError,
     APIConnectionError,
-    AuthenticationError,
+    AuthenticationError as OpenAIAuthenticationError,
     BadRequestError,
-    APIError
+    APIError as OpenAIAPIError,
 )
 
-# Add Anthropic import
+# Anthropic async client
+from anthropic import AsyncAnthropic
 import anthropic
 
 from app.config import settings, get_model_config
@@ -60,7 +60,7 @@ class AuthError(AIError):
     code = "AUTH_ERROR"
     suggested_action = "Check API key configuration."
 
-class RateLimitError(AIError):
+class RateLimitExceeded(AIError):
     """Exception for rate limit errors."""
     category = "rate_limit_error"
     retryable = True
@@ -88,9 +88,9 @@ except Exception as e:
     logger.error(f"Failed to initialize OpenAI client: {str(e)}")
     raise AIServiceError(f"Failed to initialize OpenAI client: {str(e)}")
 
-# Initialize Anthropic client
+# Initialize Anthropic async client
 try:
-    anthropic_client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+    anthropic_client = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
 except Exception as e:
     logger.error(f"Failed to initialize Anthropic client: {str(e)}")
     raise AIServiceError(f"Failed to initialize Anthropic client: {str(e)}")
@@ -185,6 +185,10 @@ async def _generate_with_openai(
         {"role": "user", "content": text}
     ]
     
+    # Pick a safe output budget based on config
+    from app.config import get_model_config as _get_cfg  # local import to avoid cycles
+    budget = min(settings.MAX_OUTPUT_TOKENS, _get_cfg(model_name)["max_output_tokens"])
+
     # Attempt API call with retries
     for attempt in range(max_retries):
         try:
@@ -192,7 +196,8 @@ async def _generate_with_openai(
                 model=model_name,
                 messages=messages,
                 temperature=0.7,
-                max_tokens=2000  # Adjust based on model's context window
+                max_tokens=budget,
+                response_format={"type": "json_object"},
             )
             return response.choices[0].message.content
             
@@ -219,22 +224,22 @@ async def _generate_with_openai(
                     context=context
                 )
             
-        except AuthenticationError as e:
+        except OpenAIAuthenticationError as e:
             logger.error(f"Authentication error with OpenAI API: {str(e)}")
             raise AuthError(
                 "Failed to authenticate with AI service",
                 context={"original_error": str(e)}
             )
             
-        except RateLimitError as e:
+        except OpenAIRateLimitError as e:
             if attempt < max_retries - 1:
                 logger.warning(f"Rate limit hit, retrying in {retry_delay}s...")
                 await asyncio.sleep(retry_delay)
                 continue
             
-            raise RateLimitError(
+            raise RateLimitExceeded(
                 f"Rate limit exceeded after {max_retries} attempts",
-                context={"original_error": str(e), "attempts": max_retries}
+                context={"original_error": str(e), "attempts": max_retries, "provider": "openai"}
             )
             
         except (APITimeoutError, APIConnectionError) as e:
@@ -248,7 +253,7 @@ async def _generate_with_openai(
                 context={"original_error": str(e), "attempts": max_retries}
             )
             
-        except APIError as e:
+        except OpenAIAPIError as e:
             if e.status_code >= 500 and attempt < max_retries - 1:
                 logger.warning(f"Server error, retrying in {retry_delay}s...")
                 await asyncio.sleep(retry_delay)
@@ -278,15 +283,19 @@ async def _generate_with_anthropic(
     # Attempt API call with retries
     for attempt in range(max_retries):
         try:
-            # Anthropic's API is a bit different from OpenAI's
-            response = anthropic_client.messages.create(
+            # Anthropic's async Messages API
+            from app.config import get_model_config as _get_cfg  # local import to avoid cycles
+            budget = min(settings.MAX_OUTPUT_TOKENS, _get_cfg(model_name)["max_output_tokens"])
+
+            response = await anthropic_client.messages.create(
                 model=model_name,
                 system=system_prompt,
                 messages=[{"role": "user", "content": text}],
                 temperature=0.7,
-                max_tokens=2000
+                max_tokens=budget
             )
-            return response.content[0].text
+            parts = [b.text for b in response.content if getattr(b, "type", None) == "text"]
+            return "".join(parts).strip()
             
         except anthropic.APIStatusError as e:
             error_msg = str(e).lower()
@@ -324,9 +333,9 @@ async def _generate_with_anthropic(
                     await asyncio.sleep(retry_delay)
                     continue
                 
-                raise RateLimitError(
+                raise RateLimitExceeded(
                     f"Rate limit exceeded after {max_retries} attempts",
-                    context={"original_error": str(e), "attempts": max_retries}
+                    context={"original_error": str(e), "attempts": max_retries, "provider": "anthropic"}
                 )
             elif e.status_code >= 500:
                 logger.error(f"Unexpected Anthropic API error: {str(e)}")

@@ -9,6 +9,11 @@ from app.api.v1 import ai_tasks
 
 class JSONFormatter(logging.Formatter):
     """Custom JSON formatter for structured logging"""
+    _std = {
+        'name','msg','args','levelname','levelno','pathname','filename','module','exc_info',
+        'exc_text','stack_info','lineno','funcName','created','msecs','relativeCreated','thread',
+        'threadName','processName','process'
+    }
     def format(self, record):
         log_data = {
             "timestamp": datetime.utcnow().isoformat(),
@@ -18,30 +23,31 @@ class JSONFormatter(logging.Formatter):
             "function": record.funcName,
             "line": record.lineno,
         }
-        
-        # Add extra fields if they exist
-        if hasattr(record, "extra"):
-            log_data.update(record.extra)
-        
-        # Add exception info if it exists
+        # Merge any extra attributes
+        for k, v in record.__dict__.items():
+            if k not in self._std and not k.startswith('_'):
+                log_data[k] = v
+        # Add exception info if present
         if record.exc_info:
             log_data["exception"] = self.formatException(record.exc_info)
-        
         return json.dumps(log_data)
 
 def setup_logging():
     """Configure structured JSON logging"""
     # Create logger
     logger = logging.getLogger()
-    logger.setLevel(logging.INFO)
-    
+    # Honor LOG_LEVEL
+    level = getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO)
+    logger.setLevel(level)
+
     # Create console handler
     console_handler = logging.StreamHandler()
     console_handler.setFormatter(JSONFormatter())
-    
-    # Add handler to logger
+
+    # Reset handlers to avoid duplicate logs in reload
+    logger.handlers = []
     logger.addHandler(console_handler)
-    
+
     # Set logging level for uvicorn
     logging.getLogger("uvicorn").setLevel(logging.WARNING)
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
@@ -59,10 +65,18 @@ def create_app() -> FastAPI:
     )
     
     # Configure CORS
+    allow_origins = settings.CORS_ORIGINS or []
+    allow_credentials = True
+    # If wildcard origins or empty, disable credentials for safety
+    if not allow_origins or "*" in allow_origins:
+        allow_credentials = False
+        if not allow_origins:
+            allow_origins = ["*"]
+
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.CORS_ORIGINS,
-        allow_credentials=True,
+        allow_origins=allow_origins,
+        allow_credentials=allow_credentials,
         allow_methods=["*"],
         allow_headers=["*"],
     )

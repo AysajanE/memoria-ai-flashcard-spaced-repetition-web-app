@@ -1,7 +1,8 @@
 import logging
 import time
+import asyncio
 from typing import Dict, Any
-from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException, status
+from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException, status, Request
 from app.dependencies import validate_internal_api_key
 from app.schemas.ai_tasks import GenerateCardsRequest
 from app.core.logic import process_card_generation
@@ -12,6 +13,25 @@ from app.config import settings, get_model_config
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# In-flight job guard (in-process)
+_IN_FLIGHT: set[str] = set()
+_LOCK = asyncio.Lock()
+
+# Naive per-IP rate limiter (in-process)
+_RATE_BUCKETS: Dict[str, Dict[str, float]] = {}
+_RATE_LIMIT = 30  # requests per minute
+
+async def _rate_limit(ip: str) -> None:
+    now = time.time()
+    window = 60.0
+    b = _RATE_BUCKETS.get(ip)
+    if not b or now - b.get("start", 0) >= window:
+        _RATE_BUCKETS[ip] = {"start": now, "count": 1.0}
+        return
+    if b["count"] >= _RATE_LIMIT:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Rate limit exceeded")
+    b["count"] += 1.0
 
 async def process_ai_job(job_id: str, input_data: Dict[str, Any]) -> None:
     """
@@ -53,66 +73,52 @@ async def process_ai_job(job_id: str, input_data: Dict[str, Any]) -> None:
             num_cards=num_cards,
             start_time=time.time()
         )
-        
+
         logger.info(f"Successfully processed job {job_id}")
-        
-    except TokenLimitError as e:
-        logger.error(f"Token limit error for job {job_id}: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
-        
-    except AIServiceError as e:
-        logger.error(f"AI service error for job {job_id}: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
-        
-    except ValueError as e:
-        logger.error(f"Validation error for job {job_id}: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
-        
     except Exception as e:
-        logger.error(f"Unexpected error processing job {job_id}: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An unexpected error occurred"
-        )
+        # Do not raise HTTPException here; background errors are delivered via webhook in process_card_generation
+        logger.error(f"Background job error for {job_id}: {e}")
+    finally:
+        async with _LOCK:
+            _IN_FLIGHT.discard(job_id)
 
 @router.post(
     "/generate-cards",
     status_code=status.HTTP_202_ACCEPTED,
     dependencies=[Depends(validate_internal_api_key)]
 )
-async def trigger_generate_cards(request: GenerateCardsRequest, background_tasks: BackgroundTasks):
+async def trigger_generate_cards(request: GenerateCardsRequest, background_tasks: BackgroundTasks, http_request: Request):
     """Trigger card generation process."""
-    logger.info(f"Received card generation request for jobId: {request.jobId}")
-    logger.debug(f"Input text length: {len(request.text)}")
+    client_ip = http_request.client.host if http_request.client else "unknown"
+    await _rate_limit(client_ip)
+
+    logger.info(f"Received card generation request for jobId: {request.jobId}", extra={"jobId": request.jobId, "ip": client_ip})
+    logger.debug(f"Input text length: {len(request.text)}", extra={"jobId": request.jobId})
     
-    # Add background task for card generation
-    background_tasks.add_task(
-        process_ai_job,
-        request.jobId,
-        {
-            "text": request.text,
-            "model": request.model,
-            "cardType": request.cardType,
-            "numCards": request.numCards,
-            "config": request.config
-        }
-    )
+    # Add background task for card generation (idempotent)
+    async with _LOCK:
+        if request.jobId in _IN_FLIGHT:
+            logger.info("Duplicate job submission ignored (in-flight)", extra={"jobId": request.jobId})
+        else:
+            _IN_FLIGHT.add(request.jobId)
+            background_tasks.add_task(
+                process_ai_job,
+                request.jobId,
+                {
+                    "text": request.text,
+                    "model": request.model,
+                    "cardType": request.cardType,
+                    "numCards": request.numCards,
+                    "config": request.config
+                }
+            )
     
     return {
         "message": "Card generation request received",
         "jobId": request.jobId
     }
 
-@router.get("/available-models")
+@router.get("/available-models", dependencies=[Depends(validate_internal_api_key)])
 async def get_available_models():
     """Get information about available AI models."""
     # Return a list of models and their information

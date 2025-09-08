@@ -6,7 +6,7 @@ import requests
 from app.config import settings
 import hmac
 import hashlib
-from app.core.ai_caller import generate_cards_with_ai, TokenLimitError, AIServiceError, AuthError, RateLimitError, NetworkError, AIModelError
+from app.core.ai_caller import generate_cards_with_ai, TokenLimitError, AIServiceError, AuthError, RateLimitExceeded, NetworkError, AIModelError
 from app.core.text_processing import count_tokens
 from app.schemas.responses import WebhookPayload, GenerateCardsResult, ErrorDetail, ErrorCategory
 
@@ -156,7 +156,8 @@ def parse_ai_response(response_text: str) -> Dict[str, Any]:
                 suggested_action="Check AI model parameters or try a different model"
             )
         
-        # Validate each card structure
+        # Validate each card structure and enforce type/length bounds
+        validated_cards: List[Dict[str, Any]] = []
         for i, card in enumerate(result["cards"]):
             if not isinstance(card, dict):
                 raise ParseError(
@@ -164,21 +165,38 @@ def parse_ai_response(response_text: str) -> Dict[str, Any]:
                     code="INVALID_CARD_TYPE",
                     context={"index": i, "card_type": type(card).__name__}
                 )
-                
-            if "front" not in card:
+
+            front = card.get("front")
+            back = card.get("back")
+            if front is None:
                 raise ParseError(
                     f"Card at index {i} missing 'front' field",
                     code="MISSING_FRONT_FIELD",
                     context={"index": i, "card_fields": list(card.keys())}
                 )
-                
-            if "back" not in card:
+            if back is None:
                 raise ParseError(
                     f"Card at index {i} missing 'back' field",
-                    code="MISSING_BACK_FIELD", 
+                    code="MISSING_BACK_FIELD",
                     context={"index": i, "card_fields": list(card.keys())}
                 )
-        
+            if not isinstance(front, str) or not isinstance(back, str):
+                raise ParseError(
+                    f"Card at index {i} must have string 'front' and 'back'",
+                    code="INVALID_CARD_FIELD_TYPES",
+                    context={"index": i, "front_type": type(front).__name__, "back_type": type(back).__name__}
+                )
+            front_s = front.strip()
+            back_s = back.strip()
+            if len(front_s) == 0 or len(front_s) > 1000 or len(back_s) == 0 or len(back_s) > 1000:
+                raise ParseError(
+                    f"Card at index {i} has invalid lengths",
+                    code="INVALID_CARD_LENGTH",
+                    context={"index": i, "front_len": len(front_s), "back_len": len(back_s)}
+                )
+            validated_cards.append({"front": front_s, "back": back_s})
+
+        result["cards"] = validated_cards
         return result
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse AI response: {e}")
@@ -421,14 +439,28 @@ async def process_card_generation(
         
         send_webhook_with_retry(webhook_payload)
         
-    except (TokenLimitError, ParseError, AuthError, RateLimitError, 
+    except (TokenLimitError, ParseError, AuthError, RateLimitExceeded, 
             NetworkError, AIModelError, AIServiceError) as e:
         # Handle all our custom error types
         
         # Prepare detailed error information
+        # Map internal category strings to public enum values
+        _CATEGORY_MAP = {
+            "token_limit_error": ErrorCategory.TOKEN_LIMIT,
+            "service_error": ErrorCategory.INTERNAL_ERROR,
+            "auth_error": ErrorCategory.AUTH_ERROR,
+            "rate_limit_error": ErrorCategory.RATE_LIMIT,
+            "network_error": ErrorCategory.NETWORK_ERROR,
+            "model_error": ErrorCategory.AI_MODEL_ERROR,
+            "parse_error": ErrorCategory.PARSE_ERROR,
+            "webhook_error": ErrorCategory.WEBHOOK_ERROR,
+            "unknown_error": ErrorCategory.UNKNOWN_ERROR,
+        }
+        category_value = _CATEGORY_MAP.get(getattr(e, "category", "unknown_error"), ErrorCategory.UNKNOWN_ERROR)
+
         error_detail = ErrorDetail(
             message=str(e),
-            category=ErrorCategory(getattr(e, "category", "unknown_error")),
+            category=category_value,
             code=getattr(e, "code", None),
             context=getattr(e, "context", None),
             retryable=getattr(e, "retryable", False),
