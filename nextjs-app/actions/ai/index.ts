@@ -46,6 +46,8 @@ import { processingJobs } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import { z } from "zod";
 import { triggerCardGeneration } from "@/lib/ai-client";
+import { enforceRateLimit } from "@/lib/rate-limit";
+import { log } from "@/lib/log";
 
 /**
  * Input validation schema for the user request data to this server action.
@@ -56,7 +58,7 @@ import { triggerCardGeneration } from "@/lib/ai-client";
 const SubmitJobSchema = z.object({
   jobType: z.enum(["summarize", "generate-prompts", "generate-cards"]).optional(), // Updated to include generate-cards
   inputPayload: z.object({
-    text: z.string().min(1, "Text is required"),
+    text: z.string().min(1, "Text is required").max(50000, "Text too long (50k char max)"),
   }),
   documentId: z.string().optional(),
 });
@@ -104,6 +106,9 @@ export async function submitAiJobAction(
     const { jobType = "generate-cards", inputPayload, documentId } = parsed.data;
     const userInputText = inputPayload.text;
 
+    // Rate limit per user: 10 submissions/minute
+    await enforceRateLimit(userId, "submit-ai-job", 10);
+
     // 1) Create a job record in DB with status = 'pending'
     let createdJob;
     try {
@@ -121,6 +126,7 @@ export async function submitAiJobAction(
         })
         .returning({ id: processingJobs.id });
       createdJob = job;
+      log.info("submitAiJobAction.job_created", { jobId: createdJob.id, userId, jobType });
     } catch (dbError) {
       console.error("Error creating processingJobs record:", dbError);
       return {
@@ -141,6 +147,7 @@ export async function submitAiJobAction(
       // We do NOT mark job as "processing" here. The AI service will do that
       // via our webhook once it starts or completes the background work.
 
+      log.info("submitAiJobAction.triggered", { jobId: createdJob.id, userId });
       return {
         isSuccess: true,
         data: {

@@ -30,6 +30,8 @@ import { z } from "zod";
 import { db } from "@/db";
 import { processingJobs } from "@/db/schema";
 import { triggerCardGeneration, FormInputSchema } from "@/lib/ai-client";
+import { enforceRateLimit } from "@/lib/rate-limit";
+import { log } from "@/lib/log";
 
 // Define ActionState locally or import from '@/types' if defined there
 // Ensure its 'error' type is: error?: Record<string, string[]> | null;
@@ -85,6 +87,9 @@ export async function submitTextForCardsAction(
       };
     }
 
+    // Rate limit per user: 10 submissions/minute
+    await enforceRateLimit(userId, "submit-text", 10);
+
     // Create processing job record
     const [job] = await db
       .insert(processingJobs)
@@ -100,6 +105,8 @@ export async function submitTextForCardsAction(
       throw new Error("Failed to create processing job record in database.");
     }
 
+    log.info("submitTextForCardsAction.job_created", { jobId: job.id, userId });
+
     // Trigger AI service
     await triggerCardGeneration({
       jobId: job.id,
@@ -112,6 +119,7 @@ export async function submitTextForCardsAction(
     revalidatePath("/create");
     revalidatePath(`/create/${job.id}`);
 
+    log.info("submitTextForCardsAction.triggered", { jobId: job.id, userId });
     return {
       isSuccess: true,
       message: "Card generation started successfully",

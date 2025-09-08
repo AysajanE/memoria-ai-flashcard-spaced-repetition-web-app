@@ -2,7 +2,7 @@ import { z } from "zod";
 
 // Form input validation schema (without jobId requirement)
 export const FormInputSchema = z.object({
-  text: z.string().min(1, "Text is required"),
+  text: z.string().min(1, "Text is required").max(50000, "Text too long (50k char max)"),
   model: z.enum(["gpt-4o-mini", "claude-haiku-3-5-latest"]).optional(),
   cardType: z.enum(["qa", "cloze"]).optional(),
   numCards: z.number().min(1).max(50).optional(),
@@ -11,7 +11,7 @@ export const FormInputSchema = z.object({
 // Request schema matching Python service
 export const GenerateCardsRequestSchema = z.object({
   jobId: z.string().uuid(),
-  text: z.string().min(1),
+  text: z.string().min(1).max(50000),
   model: z.enum(["gpt-4o-mini", "claude-haiku-3-5-latest"]).optional(),
   cardType: z.enum(["qa", "cloze"]).optional(),
   numCards: z.number().min(1).max(50).optional(),
