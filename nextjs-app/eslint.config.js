@@ -2,19 +2,14 @@
 // Adjusting imports might be needed depending on how FlatCompat works in CJS context.
 // Let's assume the original dynamic imports work or adjust if ESLint complains later.
 const { dirname } = require("path");
-const { fileURLToPath } = require("url");
 const { FlatCompat } = require("@eslint/eslintrc");
 // Assuming nextPlugin might need require or different handling in CJS
 // If '@next/eslint-plugin-next' provides a CJS entry point:
 const nextPlugin = require("@next/eslint-plugin-next"); 
 // If not, you might need to investigate how to load ESM plugins in CJS eslint config
 
-const __filename = fileURLToPath(import.meta.url); // Note: import.meta.url might behave differently in CJS. Often __filename is available directly.
-const __dirname = dirname(__filename); // Often __dirname is available directly in CJS.
-
-const compat = new FlatCompat({
-  baseDirectory: __dirname,
-});
+// In CJS, __dirname is available natively
+const compat = new FlatCompat({ baseDirectory: __dirname || process.cwd() });
 
 const eslintConfig = [
   {

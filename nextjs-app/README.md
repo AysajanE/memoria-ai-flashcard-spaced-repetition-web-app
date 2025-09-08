@@ -35,6 +35,14 @@ After copying `.env.example` to `.env.local`, fill in all necessary values. **Ne
    npm run dev
    ```
 
+### Tests
+
+- Run unit tests (Vitest):
+  ```bash
+  npm run test
+  ```
+  This includes tests for SRS scheduling and Clerk webhook email extraction.
+
 ### AI Service Setup
 
 1. Navigate to the `ai-service` directory
@@ -50,8 +58,14 @@ After copying `.env.example` to `.env.local`, fill in all necessary values. **Ne
 4. Copy `.env.example` to `.env.local` and fill in the required values
 5. Run the development server:
    ```bash
-   uvicorn app.main:app --reload --port 8000
-   ```
+  uvicorn app.main:app --reload --port 8000
+  ```
+
+### Webhook Security (Recommended)
+
+- Set `INTERNAL_WEBHOOK_HMAC_SECRET` in `.env.local` to enable HMAC verification on `/api/webhooks/ai-service-status`.
+- Rotate `INTERNAL_API_KEY` immediately if it was ever exposed (older debug page sent a hardcoded key).
+- In development, use the debug page `/create/debug`. It now uses a server action that reads secrets server-side — no secrets are sent from the browser.
 
 ## Environment Variables
 

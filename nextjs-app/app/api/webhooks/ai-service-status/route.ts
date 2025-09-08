@@ -3,6 +3,8 @@ import { db } from "@/db";
 import { processingJobs } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
+import crypto from "crypto";
+import { isLegalTransition, isTerminal } from "@/lib/job-state";
 
 // Define error detail schema for better error handling
 const ErrorCategory = z.enum([
@@ -38,6 +40,8 @@ const StatusUpdateSchema = z.object({
 
 export async function POST(request: Request) {
   try {
+    const raw = await request.text();
+
     // Verify API Key
     const apiKey = request.headers.get("x-internal-api-key");
     if (!apiKey || apiKey !== process.env.INTERNAL_API_KEY) {
@@ -47,37 +51,100 @@ export async function POST(request: Request) {
       );
     }
 
-    // Parse and validate payload
-    const payload = await request.json();
-    const validatedPayload = StatusUpdateSchema.parse(payload);
-
-    // Update job record
-    const [updatedJob] = await db
-      .update(processingJobs)
-      .set({
-        status: validatedPayload.status,
-        resultPayload: validatedPayload.resultPayload,
-        // For backward compatibility, prioritize errorDetail but fall back to errorMessage
-        errorMessage: validatedPayload.errorDetail?.message || validatedPayload.errorMessage,
-        // Store the full error detail as a JSON object
-        errorDetail: validatedPayload.errorDetail ? JSON.stringify(validatedPayload.errorDetail) : null,
-        completedAt: new Date(),
-      })
-      .where(eq(processingJobs.id, validatedPayload.jobId))
-      .returning();
-
-    if (!updatedJob) {
-      console.warn(`Job not found: ${validatedPayload.jobId}`);
-      return NextResponse.json(
-        { error: "Job not found", errorCode: "JOB_NOT_FOUND" },
-        { status: 404 }
-      );
+    // Optional HMAC verification
+    const hmacSecret = process.env.INTERNAL_WEBHOOK_HMAC_SECRET;
+    if (hmacSecret) {
+      const ts = request.headers.get("x-webhook-timestamp");
+      const sig = request.headers.get("x-webhook-signature");
+      if (!ts || !sig) {
+        return NextResponse.json(
+          { error: "Missing signature headers", errorCode: "MISSING_SIGNATURE" },
+          { status: 401 }
+        );
+      }
+      const age = Math.abs(Date.now() - Number(ts));
+      if (!Number.isFinite(age) || age > 5 * 60 * 1000) {
+        return NextResponse.json(
+          { error: "Signature timestamp expired", errorCode: "TIMESTAMP_EXPIRED" },
+          { status: 401 }
+        );
+      }
+      const expected =
+        "sha256=" + crypto.createHmac("sha256", hmacSecret).update(`${ts}.${raw}`).digest("hex");
+      const valid =
+        expected.length === sig.length &&
+        crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(sig));
+      if (!valid) {
+        return NextResponse.json(
+          { error: "Invalid signature", errorCode: "INVALID_SIGNATURE" },
+          { status: 401 }
+        );
+      }
     }
 
-    return NextResponse.json(
-      { message: "Status updated successfully" },
-      { status: 200 }
-    );
+    // Parse and validate payload
+    const payload = JSON.parse(raw);
+    const validatedPayload = StatusUpdateSchema.parse(payload);
+
+    // Enforce state machine & idempotency
+    const result = await db.transaction(async (tx) => {
+      const current = await tx.query.processingJobs.findFirst({
+        where: eq(processingJobs.id, validatedPayload.jobId),
+        columns: { status: true },
+      });
+      if (!current) {
+        return NextResponse.json(
+          { error: "Job not found", errorCode: "JOB_NOT_FOUND" },
+          { status: 404 }
+        );
+      }
+
+      if (isTerminal(current.status as any)) {
+        return NextResponse.json(
+          { message: "Already finalized", status: current.status },
+          { status: 200 }
+        );
+      }
+
+      if (!isLegalTransition(current.status as any, validatedPayload.status)) {
+        return NextResponse.json(
+          {
+            error: "Illegal transition",
+            from: current.status,
+            to: validatedPayload.status,
+            errorCode: "ILLEGAL_TRANSITION",
+          },
+          { status: 409 }
+        );
+      }
+
+      const [updated] = await tx
+        .update(processingJobs)
+        .set({
+          status: validatedPayload.status,
+          resultPayload: validatedPayload.resultPayload,
+          errorMessage:
+            validatedPayload.errorDetail?.message || validatedPayload.errorMessage || null,
+          errorDetail: validatedPayload.errorDetail ?? null,
+          completedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(processingJobs.id, validatedPayload.jobId))
+        .returning({ id: processingJobs.id });
+
+      if (!updated) {
+        return NextResponse.json(
+          { error: "Failed to update job", errorCode: "UPDATE_FAILED" },
+          { status: 500 }
+        );
+      }
+      return NextResponse.json(
+        { message: "Status updated successfully" },
+        { status: 200 }
+      );
+    });
+
+    return result;
   } catch (error) {
     console.error("Error processing AI service status update:", error);
 

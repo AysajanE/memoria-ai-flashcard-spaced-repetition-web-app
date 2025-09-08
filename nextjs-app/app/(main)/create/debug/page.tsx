@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { listPendingJobsAction } from "@/actions/ai";
+import { simulateWebhookAction } from "@/actions/ai/simulate-webhook";
 
 export default function DebugPage() {
   const [jobs, setJobs] = useState<any[]>([]);
@@ -31,38 +32,13 @@ export default function DebugPage() {
 
   const sendWebhook = async (jobId: string) => {
     try {
-      const response = await fetch('/api/webhooks/ai-service-status', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-internal-api-key': 'memoria_ai_service_secret_key_2024'
-        },
-        body: JSON.stringify({
-          jobId: jobId,
-          status: "completed",
-          resultPayload: {
-            cards: [
-              {
-                front: "What is AI?",
-                back: "AI is intelligence demonstrated by machines, as opposed to natural intelligence displayed by animals including humans."
-              },
-              {
-                front: "How is AI different from natural intelligence?",
-                back: "AI is demonstrated by machines, while natural intelligence is displayed by animals including humans."
-              }
-            ]
-          }
-        })
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        console.error("Webhook error:", errorData);
-        alert(`Error: ${JSON.stringify(errorData)}`);
-      } else {
-        alert("Webhook sent successfully");
-        await fetchJobs(); // Refresh the list
+      const res = await simulateWebhookAction(jobId);
+      if (!res.ok) {
+        alert(`Error: ${res.message}`);
+        return;
       }
+      alert("Webhook sent successfully");
+      await fetchJobs();
     } catch (err) {
       console.error("Error sending webhook:", err);
       alert(`Error sending webhook: ${err}`);

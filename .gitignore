@@ -99,3 +99,7 @@ celerybeat.pid
 # Docker related (sometimes ignored, sometimes not)
 # docker-compose.override.ymlnode_modules/
 node_modules
+
+# IDE files
+.claude
+.cursor

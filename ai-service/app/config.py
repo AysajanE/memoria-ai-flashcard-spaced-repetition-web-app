@@ -43,6 +43,7 @@ class Settings(BaseSettings):
 
     # API Keys and Authentication
     INTERNAL_API_KEY: str
+    INTERNAL_WEBHOOK_HMAC_SECRET: str = ""
     NEXTJS_APP_STATUS_WEBHOOK_URL: str
 
     # CORS Settings

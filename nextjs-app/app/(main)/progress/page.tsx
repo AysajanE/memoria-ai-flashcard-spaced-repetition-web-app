@@ -1,4 +1,4 @@
-import { getUserStatsAction } from "@/actions/tracking";
+import { getUserStatsAction } from "@/actions/db/users";
 import { StatsDisplay } from "@/components/features/tracking/stats-display";
 import { PageHeader } from "@/components/shared/page-header";
 

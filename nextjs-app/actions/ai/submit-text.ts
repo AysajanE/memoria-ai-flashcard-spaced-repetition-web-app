@@ -30,7 +30,6 @@ import { z } from "zod";
 import { db } from "@/db";
 import { processingJobs } from "@/db/schema";
 import { triggerCardGeneration, FormInputSchema } from "@/lib/ai-client";
-import { eq } from "drizzle-orm";
 
 // Define ActionState locally or import from '@/types' if defined there
 // Ensure its 'error' type is: error?: Record<string, string[]> | null;
@@ -109,15 +108,6 @@ export async function submitTextForCardsAction(
       cardType: validatedData.data.cardType,
       numCards: validatedData.data.numCards,
     });
-
-    // Mark job as "processing"
-    await db
-      .update(processingJobs)
-      .set({
-        status: "processing",
-        updatedAt: new Date(),
-      })
-      .where(eq(processingJobs.id, job.id));
 
     revalidatePath("/create");
     revalidatePath(`/create/${job.id}`);

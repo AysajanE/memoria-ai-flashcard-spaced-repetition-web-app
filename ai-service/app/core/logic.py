@@ -4,6 +4,8 @@ import logging
 from typing import Dict, List, Any
 import requests
 from app.config import settings
+import hmac
+import hashlib
 from app.core.ai_caller import generate_cards_with_ai, TokenLimitError, AIServiceError, AuthError, RateLimitError, NetworkError, AIModelError
 from app.core.text_processing import count_tokens
 from app.schemas.responses import WebhookPayload, GenerateCardsResult, ErrorDetail, ErrorCategory
@@ -217,19 +219,30 @@ def send_webhook_with_retry(
     
     for attempt in range(max_retries):
         try:
-            # Manually serialize to JSON to handle datetime objects
-            # Note: Using model_dump(mode="json") to ensure datetime objects are serialized properly
-            json_payload = payload.model_dump(mode="json")
-            
+            # Serialize to JSON string explicitly to compute HMAC over exact body
+            json_obj = payload.model_dump(mode="json")
+            raw = json.dumps(json_obj, separators=(",", ":"))
+
+            headers = {
+                "x-internal-api-key": settings.INTERNAL_API_KEY,
+                "content-type": "application/json",
+                "user-agent": "ai-service-webhook/1.0",
+            }
+            if settings.INTERNAL_WEBHOOK_HMAC_SECRET:
+                ts = str(int(time.time() * 1000))
+                mac = hmac.new(
+                    settings.INTERNAL_WEBHOOK_HMAC_SECRET.encode("utf-8"),
+                    f"{ts}.{raw}".encode("utf-8"),
+                    hashlib.sha256,
+                ).hexdigest()
+                headers["x-webhook-timestamp"] = ts
+                headers["x-webhook-signature"] = f"sha256={mac}"
+
             response = requests.post(
                 settings.NEXTJS_APP_STATUS_WEBHOOK_URL,
-                json=json_payload,
-                headers={
-                    "x-internal-api-key": settings.INTERNAL_API_KEY,
-                    "content-type": "application/json",
-                    "user-agent": "ai-service-webhook/1.0"
-                },
-                timeout=10
+                data=raw,
+                headers=headers,
+                timeout=10,
             )
             last_status = response.status_code
             
@@ -462,11 +475,23 @@ async def process_card_generation(
                 errorMessage=f"Webhook delivery error: {str(e)}"
             )
             # Use a direct POST without our retry mechanism which already failed
+            json_obj = simple_payload.model_dump(mode="json")
+            raw = json.dumps(json_obj, separators=(",", ":"))
+            headers = {"x-internal-api-key": settings.INTERNAL_API_KEY, "content-type": "application/json"}
+            if settings.INTERNAL_WEBHOOK_HMAC_SECRET:
+                ts = str(int(time.time() * 1000))
+                mac = hmac.new(
+                    settings.INTERNAL_WEBHOOK_HMAC_SECRET.encode("utf-8"),
+                    f"{ts}.{raw}".encode("utf-8"),
+                    hashlib.sha256,
+                ).hexdigest()
+                headers["x-webhook-timestamp"] = ts
+                headers["x-webhook-signature"] = f"sha256={mac}"
             requests.post(
                 settings.NEXTJS_APP_STATUS_WEBHOOK_URL,
-                json=simple_payload.model_dump(),
-                headers={"x-internal-api-key": settings.INTERNAL_API_KEY},
-                timeout=5
+                data=raw,
+                headers=headers,
+                timeout=5,
             )
         except Exception as fallback_err:
             logger.error(f"Failed to send fallback error notification: {fallback_err}")

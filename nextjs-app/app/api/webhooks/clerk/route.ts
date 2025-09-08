@@ -3,10 +3,11 @@ import { WebhookEvent } from "@clerk/nextjs/server";
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { syncUser } from "@/actions/db/users";
+import { extractPrimaryEmail } from "@/lib/clerk";
 
 export async function POST(req: Request) {
   // Get the headers
-  const headerPayload = await headers();
+  const headerPayload = headers();
   const svix_id = headerPayload.get("svix-id");
   const svix_timestamp = headerPayload.get("svix-timestamp");
   const svix_signature = headerPayload.get("svix-signature");
@@ -21,7 +22,12 @@ export async function POST(req: Request) {
   const body = JSON.stringify(payload);
 
   // Create a new Svix instance with your secret.
-  const wh = new Webhook(process.env.CLERK_WEBHOOK_SECRET || "");
+  const secret = process.env.CLERK_WEBHOOK_SECRET;
+  if (!secret) {
+    console.error("CLERK_WEBHOOK_SECRET is not set");
+    return new NextResponse("Server misconfiguration", { status: 500 });
+  }
+  const wh = new Webhook(secret);
 
   let evt: WebhookEvent;
 
@@ -40,20 +46,23 @@ export async function POST(req: Request) {
   // Handle the webhook
   const eventType = evt.type;
 
-  if (eventType === "user.created") {
-    const { id, email_addresses, created_at, updated_at } = evt.data;
+  if (eventType === "user.created" || eventType === "user.updated") {
+    const { id, email_addresses, primary_email_address_id, created_at, updated_at } =
+      (evt.data as any) || {};
 
-    // Get the primary email address
-    const primaryEmail = email_addresses.find(
-      (email) => email.id === email_addresses[0].id
-    )?.email_address;
+    // Extract primary email using Clerk-provided primary_email_address_id
+    const primaryEmail = extractPrimaryEmail({
+      emailAddresses: email_addresses as any,
+      primaryEmailAddressId: primary_email_address_id as any,
+    });
+
     if (!primaryEmail) {
       console.error("No primary email found for user:", id);
       return new NextResponse("No primary email found", { status: 400 });
     }
 
     try {
-      await syncUser(id, primaryEmail, created_at, updated_at);
+      await syncUser(id as string, primaryEmail, created_at as number, updated_at as number);
       return new NextResponse("User synced successfully", { status: 200 });
     } catch (error) {
       console.error("Error syncing user:", error);
