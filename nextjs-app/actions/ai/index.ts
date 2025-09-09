@@ -110,6 +110,17 @@ export async function submitAiJobAction(
     // Rate limit per user: 10 submissions/minute
     await enforceRateLimit(userId, "submit-ai-job", 10);
 
+    // Log AI processing request initiation
+    const startTime = Date.now();
+    log.info("AI processing request initiated", {
+      component: "ai_service",
+      operation: "submit_request",
+      userId: userId,
+      contentLength: userInputText.length,
+      jobType: jobType,
+      documentId: documentId
+    });
+
     // 1) Create a job record in DB with status = 'pending'
     let createdJob;
     try {
@@ -129,7 +140,16 @@ export async function submitAiJobAction(
       createdJob = job;
       log.info("submitAiJobAction.job_created", { jobId: createdJob.id, userId, jobType });
     } catch (dbError) {
-      console.error("Error creating processingJobs record:", dbError);
+      log.error("Failed to create processing job", {
+        component: "ai_service",
+        operation: "create_job_record",
+        errorCategory: "database_error",
+        errorCode: "JOB_CREATION_FAILED",
+        userId: userId,
+        jobType: jobType,
+        errorMessage: dbError instanceof Error ? dbError.message : "Unknown database error",
+        errorStack: dbError instanceof Error ? dbError.stack : undefined
+      });
       return {
         isSuccess: false,
         message: "Failed to create job record",
@@ -138,6 +158,18 @@ export async function submitAiJobAction(
 
     // 2) Call the AI service asynchronously
     try {
+      // Log before sending webhook to AI service
+      log.info("Sending webhook to AI service", {
+        component: "ai_service",
+        operation: "send_webhook",
+        jobId: createdJob.id,
+        requestPayload: {
+          contentLength: userInputText.length,
+          jobType: jobType,
+          cardType: jobType === "generate-cards" ? "qa" : undefined
+        }
+      });
+
       await triggerCardGeneration({
         jobId: createdJob.id, // We pass the newly created job's ID
         text: userInputText,
@@ -158,7 +190,16 @@ export async function submitAiJobAction(
         message: "Job creation succeeded. AI service triggered.",
       };
     } catch (aiError) {
-      console.error("Failed to contact AI service:", aiError);
+      log.error("Failed to contact AI service", {
+        component: "ai_service",
+        operation: "send_webhook",
+        errorCategory: "network_error",
+        errorCode: "AI_SERVICE_UNREACHABLE",
+        jobId: createdJob.id,
+        userId: userId,
+        errorMessage: aiError instanceof Error ? aiError.message : "Unknown error contacting AI service",
+        errorStack: aiError instanceof Error ? aiError.stack : undefined
+      });
 
       // If we cannot even initiate the job with the AI service, mark job "failed" immediately.
       await db
@@ -180,7 +221,14 @@ export async function submitAiJobAction(
       };
     }
   } catch (error) {
-    console.error("Error in submitAiJobAction:", error);
+    log.error("Unexpected error in AI job submission", {
+      component: "ai_service",
+      operation: "submit_request",
+      errorCategory: "internal_error",
+      errorCode: "SUBMIT_AI_JOB_FAILED",
+      errorMessage: error instanceof Error ? error.message : "Unknown error submitting AI job",
+      errorStack: error instanceof Error ? error.stack : undefined
+    });
     return {
       isSuccess: false,
       message:

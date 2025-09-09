@@ -6,6 +6,7 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 import crypto from "crypto";
 import { isLegalTransition, isTerminal } from "@/lib/job-state";
+import { log } from "@/lib/log";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -43,8 +44,10 @@ const StatusUpdateSchema = z.object({
 });
 
 export async function POST(request: Request) {
+  const startTime = Date.now();
+  let raw = "";
   try {
-    const raw = await request.text();
+    raw = await request.text();
 
     // Verify API Key
     const apiKey = request.headers.get("x-internal-api-key");
@@ -150,6 +153,17 @@ export async function POST(request: Request) {
         console.error("Cache revalidation failed (non-critical):", error);
       }
 
+      // Log successful webhook processing
+      log.info("Webhook processed successfully", {
+        component: "webhook",
+        operation: "process_status_update",
+        jobId: validatedPayload.jobId,
+        status: validatedPayload.status,
+        hasResultPayload: !!validatedPayload.resultPayload,
+        hasErrorDetail: !!validatedPayload.errorDetail,
+        processingTimeMs: Date.now() - startTime
+      });
+
       return NextResponse.json(
         { message: "Status updated successfully" },
         { status: 200 }
@@ -158,9 +172,20 @@ export async function POST(request: Request) {
 
     return result;
   } catch (error) {
-    console.error("Error processing AI service status update:", error);
-
     if (error instanceof z.ZodError) {
+      log.error("Webhook validation failed", {
+        component: "webhook",
+        operation: "validate_payload",
+        errorCategory: "invalid_payload",
+        errorCode: "INVALID_PAYLOAD",
+        validationErrors: error.errors,
+        payloadLength: raw.length,
+        headers: {
+          apiKey: request.headers.get("x-internal-api-key") ? "present" : "missing",
+          hmacSignature: request.headers.get("x-webhook-signature") ? "present" : "missing",
+          timestamp: request.headers.get("x-webhook-timestamp")
+        }
+      });
       return NextResponse.json(
         {
           error: "Invalid payload",
@@ -170,6 +195,16 @@ export async function POST(request: Request) {
         { status: 400 }
       );
     }
+
+    log.error("Webhook processing failed", {
+      component: "webhook",
+      operation: "process_status_update",
+      errorCategory: "internal_error",
+      errorCode: "INTERNAL_ERROR",
+      errorMessage: error instanceof Error ? error.message : "Unknown error",
+      errorStack: error instanceof Error ? error.stack : undefined,
+      payloadLength: raw.length
+    });
 
     return NextResponse.json(
       { error: "Internal server error", errorCode: "INTERNAL_ERROR" },
