@@ -57,7 +57,7 @@ export async function getUserStatsAction(): Promise<
       };
     }
 
-    // Fetch user record - with only existing columns
+    // Fetch user record with real data
     const user = await db.query.users.findFirst({
       where: eq(users.id, userId),
     });
@@ -69,14 +69,18 @@ export async function getUserStatsAction(): Promise<
       };
     }
 
-    // Return default values for stats since they're not in the schema yet
+    // Calculate accuracy: Math.round((correctReviews / totalReviews) * 1000) / 10
+    const accuracy = user.totalReviews > 0 
+      ? Math.round((user.totalCorrectReviews / user.totalReviews) * 1000) / 10
+      : 0;
+
     return {
       isSuccess: true,
       data: {
-        dailyCount: 0,
-        weeklyCount: 0,
-        accuracy: 0,
-        streak: 0,
+        dailyCount: user.dailyStudyCount,
+        weeklyCount: user.weeklyStudyCount,
+        accuracy: accuracy,
+        streak: user.consecutiveStudyDays,
       },
     };
   } catch (error) {
