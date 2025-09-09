@@ -75,7 +75,12 @@ class Settings(BaseSettings):
 
     # Token Limits
     MAX_INPUT_TOKENS: int = 10000
-    MAX_OUTPUT_TOKENS: int = 2048
+    MAX_OUTPUT_TOKENS: int = 4096
+
+    # Concurrency & budgets  
+    OPENAI_MAX_CONCURRENCY: int = 8
+    ANTHROPIC_MAX_CONCURRENCY: int = 8
+    TOKENS_PER_CARD_BUDGET: int = 128
 
     # Legacy fields for backwards compatibility
     API_HOST: str = "0.0.0.0"

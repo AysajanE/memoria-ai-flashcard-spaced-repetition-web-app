@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.api.v1 import ai_tasks, health, admin
 from app.core.config_validator import validate_configuration, log_configuration
+from app.core.ai_clients import validate_clients
 
 class JSONFormatter(logging.Formatter):
     """Custom JSON formatter for structured logging"""
@@ -65,24 +66,6 @@ def create_app() -> FastAPI:
         version="0.1.0"
     )
     
-    @app.on_event("startup")
-    async def startup_event():
-        from app.core.config_validator import validate_configuration, log_configuration
-        
-        log_configuration()
-        issues = validate_configuration()
-        
-        for issue in issues:
-            if issue.startswith("ERROR"):
-                logger.error(issue)
-            else:
-                logger.warning(issue)
-        
-        # Fail startup if critical errors
-        errors = [i for i in issues if i.startswith("ERROR")]
-        if errors:
-            raise RuntimeError(f"Configuration errors: {', '.join(errors)}")
-    
     # Configure CORS
     allow_origins = settings.CORS_ORIGINS or []
     allow_credentials = True
@@ -116,20 +99,32 @@ def create_app() -> FastAPI:
 
     @app.on_event("startup")
     async def startup_event():
+        logger = logging.getLogger(__name__)
+        
+        # Log configuration and validate
         log_configuration()
         issues = validate_configuration()
         
         for issue in issues:
             if issue.startswith("ERROR"):
-                logging.error(issue)
+                logger.error(issue)
             else:
-                logging.warning(issue)
+                logger.warning(issue)
         
         # Fail startup if critical errors
         errors = [i for i in issues if i.startswith("ERROR")]
         if errors:
             raise RuntimeError(f"Configuration errors: {', '.join(errors)}")
+        
+        # Validate AI clients
+        try:
+            validate_clients()
+            logger.info("AI clients validated successfully")
+        except Exception as e:
+            logger.error(f"AI client validation failed: {e}")
+            if settings.ENVIRONMENT == "production":
+                raise
     
     return app
 
-app = create_app() 
+app = create_app()

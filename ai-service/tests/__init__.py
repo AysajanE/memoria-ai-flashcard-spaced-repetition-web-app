@@ -1,1 +1,1 @@
-# Empty __init__.py file
+# Tests package for AI Service
