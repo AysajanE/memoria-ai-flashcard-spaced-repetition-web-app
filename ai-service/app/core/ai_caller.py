@@ -1,6 +1,6 @@
 import logging
 import asyncio
-from typing import Optional, List, Dict, Any
+from typing import Optional
 
 from openai import AsyncOpenAI
 # Updated imports for OpenAI v1.x (aliased to avoid collisions)
@@ -18,8 +18,26 @@ from anthropic import AsyncAnthropic
 import anthropic
 
 from app.config import settings, get_model_config
+from app.core.fallback_config import (
+    fallback_config,
+    log_fallback_attempt,
+    log_fallback_success,
+    log_all_models_failed
+)
+from app.core.circuit_breaker import (
+    openai_circuit, 
+    anthropic_circuit, 
+    CircuitBreakerOpenError
+)
+# Import lazy clients and concurrency controls
+from app.core.ai_clients import get_openai_client, get_anthropic_client
+from app.core.metrics import concurrency_tracker
 
 logger = logging.getLogger(__name__)
+
+# Semaphores for concurrency control  
+openai_sem = asyncio.Semaphore(settings.OPENAI_MAX_CONCURRENCY)
+anthropic_sem = asyncio.Semaphore(settings.ANTHROPIC_MAX_CONCURRENCY)
 
 class AIError(Exception):
     """Base exception for AI-related errors."""
@@ -81,14 +99,7 @@ class AIModelError(AIError):
     code = "MODEL_ERROR"
     suggested_action = "Try a different model or adjust parameters."
 
-# Import lazy clients
-from app.core.ai_clients import get_openai_client, get_anthropic_client
-from app.core.metrics import concurrency_tracker
-from app.core.json_parser import parse_ai_response
-
-# Semaphores for concurrency control  
-openai_sem = asyncio.Semaphore(settings.OPENAI_MAX_CONCURRENCY)
-anthropic_sem = asyncio.Semaphore(settings.ANTHROPIC_MAX_CONCURRENCY)
+# Use lazy clients instead of initializing directly
 
 async def generate_cards_with_ai(
     text: str,
@@ -136,22 +147,41 @@ async def generate_cards_with_ai(
             adjusted_prompt = adjusted_prompt.replace("{num_cards}", str(num_cards))
             
         # Choose the appropriate generation function based on the provider
-        if provider == "anthropic":
-            return await _generate_with_anthropic(
-                text=text,
-                model_name=model_name,
-                system_prompt=adjusted_prompt,
-                max_retries=max_retries,
-                retry_delay=retry_delay
-            )
-        else:  # Default to OpenAI
-            return await _generate_with_openai(
-                text=text,
-                model_name=model_name,
-                system_prompt=adjusted_prompt,
-                max_retries=max_retries,
-                retry_delay=retry_delay
-            )
+        # Use circuit breaker if enabled, otherwise use direct calls
+        if settings.ENABLE_CIRCUIT_BREAKER:
+            if provider == "anthropic":
+                return await _generate_with_anthropic_circuit_breaker(
+                    text=text,
+                    model_name=model_name,
+                    system_prompt=adjusted_prompt,
+                    max_retries=max_retries,
+                    retry_delay=retry_delay
+                )
+            else:  # Default to OpenAI
+                return await _generate_with_openai_circuit_breaker(
+                    text=text,
+                    model_name=model_name,
+                    system_prompt=adjusted_prompt,
+                    max_retries=max_retries,
+                    retry_delay=retry_delay
+                )
+        else:
+            if provider == "anthropic":
+                return await _generate_with_anthropic(
+                    text=text,
+                    model_name=model_name,
+                    system_prompt=adjusted_prompt,
+                    max_retries=max_retries,
+                    retry_delay=retry_delay
+                )
+            else:  # Default to OpenAI
+                return await _generate_with_openai(
+                    text=text,
+                    model_name=model_name,
+                    system_prompt=adjusted_prompt,
+                    max_retries=max_retries,
+                    retry_delay=retry_delay
+                )
             
     except Exception as e:
         if isinstance(e, AIError):
@@ -166,70 +196,13 @@ async def generate_cards_with_ai(
             context={"original_error": str(e), "error_type": type(e).__name__}
         )
 
-async def generate_cards_with_ai_parsed(
-    text: str,
-    model_name: str = None,
-    system_prompt: str = None,
-    card_type: str = "qa",
-    num_cards: int = 10,
-    max_retries: int = 3,
-    retry_delay: float = 1.0
-) -> List[Dict[str, Any]]:
-    """
-    Generate flashcards using AI APIs with improved parsing.
-    
-    Args:
-        text: The input text to generate cards from
-        model_name: The name of the model to use (if None, uses default from config)
-        system_prompt: The system prompt to guide card generation (if None, uses default)
-        card_type: Type of flashcards to generate ("qa" or "cloze")
-        num_cards: Number of flashcards to generate
-        max_retries: Maximum number of retry attempts
-        retry_delay: Delay between retries in seconds
-        
-    Returns:
-        List[Dict[str, Any]]: List of parsed flashcards
-        
-    Raises:
-        TokenLimitError: If input exceeds model's token limit
-        AIServiceError: For other AI service errors
-        ProcessingError: If response cannot be parsed
-    """
-    # Get raw response from AI
-    raw_response = await generate_cards_with_ai(
-        text=text,
-        model_name=model_name,
-        system_prompt=system_prompt,
-        card_type=card_type,
-        num_cards=num_cards,
-        max_retries=max_retries,
-        retry_delay=retry_delay
-    )
-    
-    # Parse response with improved error handling
-    cards = parse_ai_response(raw_response, card_type)
-    
-    # Determine budget based on number of cards
-    per_card_tokens = settings.TOKENS_PER_CARD_BUDGET
-    max_tokens = min(settings.MAX_OUTPUT_TOKENS, per_card_tokens * num_cards)
-    
-    # Log usage stats
-    logger.info("AI generation completed", extra={
-        "model": model_name or "default",
-        "cards_requested": num_cards,
-        "cards_generated": len(cards),
-        "max_tokens_budget": max_tokens
-    })
-    
-    return cards[:num_cards]  # Cap to requested number
-
 async def _generate_with_openai(
     text: str,
     model_name: str,
     system_prompt: str,
     max_retries: int = 3,
     retry_delay: float = 1.0
-) -> tuple[str, dict]:
+) -> str:
     """Generate cards using OpenAI API"""
     # Prepare messages
     messages = [
@@ -287,53 +260,53 @@ async def _generate_with_openai(
                             code="INVALID_REQUEST",
                             context=context
                         )
-                    
-                except OpenAIAuthenticationError as e:
-                    logger.error(f"Authentication error with OpenAI API: {str(e)}")
-                    raise AuthError(
-                        "Failed to authenticate with AI service",
-                        context={"original_error": str(e)}
-                    )
-                    
-                except OpenAIRateLimitError as e:
-                    if attempt < max_retries - 1:
-                        logger.warning(f"Rate limit hit, retrying in {retry_delay}s...")
-                        await asyncio.sleep(retry_delay)
-                        continue
-                    
-                    raise RateLimitExceeded(
-                        f"Rate limit exceeded after {max_retries} attempts",
-                        context={"original_error": str(e), "attempts": max_retries, "provider": "openai"}
-                    )
-                    
-                except (APITimeoutError, APIConnectionError) as e:
-                    if attempt < max_retries - 1:
-                        logger.warning(f"Network error, retrying in {retry_delay}s...")
-                        await asyncio.sleep(retry_delay)
-                        continue
-                        
-                    raise NetworkError(
-                        f"Network error communicating with AI service: {str(e)}",
-                        context={"original_error": str(e), "attempts": max_retries}
-                    )
-                    
-                except OpenAIAPIError as e:
-                    if e.status_code >= 500 and attempt < max_retries - 1:
-                        logger.warning(f"Server error, retrying in {retry_delay}s...")
-                        await asyncio.sleep(retry_delay)
-                        continue
-                        
-                    raise AIServiceError(
-                        f"Unexpected AI service error: {str(e)}",
-                        context={"original_error": str(e), "status_code": e.status_code}
-                    )
-                    
-                except Exception as e:
-                    logger.error(f"Unexpected error with OpenAI API: {str(e)}")
-                    raise AIServiceError(
-                        f"Unexpected AI service error: {str(e)}",
-                        context={"original_error": str(e)}
-                    )
+            
+        except OpenAIAuthenticationError as e:
+            logger.error(f"Authentication error with OpenAI API: {str(e)}")
+            raise AuthError(
+                "Failed to authenticate with AI service",
+                context={"original_error": str(e)}
+            )
+            
+        except OpenAIRateLimitError as e:
+            if attempt < max_retries - 1:
+                logger.warning(f"Rate limit hit, retrying in {retry_delay}s...")
+                await asyncio.sleep(retry_delay)
+                continue
+            
+            raise RateLimitExceeded(
+                f"Rate limit exceeded after {max_retries} attempts",
+                context={"original_error": str(e), "attempts": max_retries, "provider": "openai"}
+            )
+            
+        except (APITimeoutError, APIConnectionError) as e:
+            if attempt < max_retries - 1:
+                logger.warning(f"Network error, retrying in {retry_delay}s...")
+                await asyncio.sleep(retry_delay)
+                continue
+                
+            raise NetworkError(
+                f"Network error communicating with AI service: {str(e)}",
+                context={"original_error": str(e), "attempts": max_retries}
+            )
+            
+        except OpenAIAPIError as e:
+            if e.status_code >= 500 and attempt < max_retries - 1:
+                logger.warning(f"Server error, retrying in {retry_delay}s...")
+                await asyncio.sleep(retry_delay)
+                continue
+                
+            raise AIServiceError(
+                f"Unexpected AI service error: {str(e)}",
+                context={"original_error": str(e), "status_code": e.status_code}
+            )
+            
+        except Exception as e:
+            logger.error(f"Unexpected error with OpenAI API: {str(e)}")
+            raise AIServiceError(
+                f"Unexpected AI service error: {str(e)}",
+                context={"original_error": str(e)}
+            )
 
 async def _generate_with_anthropic(
     text: str,
@@ -341,94 +314,282 @@ async def _generate_with_anthropic(
     system_prompt: str,
     max_retries: int = 3,
     retry_delay: float = 1.0
-) -> tuple[str, dict]:
+) -> str:
     """Generate cards using Anthropic API"""
     
-    # Attempt API call with retries and concurrency control
+    # Attempt API call with retries
     for attempt in range(max_retries):
-        async with concurrency_tracker.track_request("anthropic"):
-            async with anthropic_sem:
-                try:
-                    # Anthropic's async Messages API
-                    from app.config import get_model_config as _get_cfg  # local import to avoid cycles
-                    budget = min(settings.MAX_OUTPUT_TOKENS, _get_cfg(model_name)["max_output_tokens"])
+        try:
+            # Anthropic's async Messages API
+            from app.config import get_model_config as _get_cfg  # local import to avoid cycles
+            budget = min(settings.MAX_OUTPUT_TOKENS, _get_cfg(model_name)["max_output_tokens"])
 
-                    client = get_anthropic_client()
-                    response = await client.messages.create(
-                        model=model_name,
-                        system=system_prompt,
-                        messages=[{"role": "user", "content": text}],
-                        temperature=0.3,
-                        max_tokens=budget,
-                        timeout=15.0
-                    )
-                    
-                    # Extract usage information
-                    usage = {
-                        "prompt_tokens": response.usage.input_tokens,
-                        "completion_tokens": response.usage.output_tokens,
-                        "total_tokens": response.usage.input_tokens + response.usage.output_tokens
+            response = await anthropic_client.messages.create(
+                model=model_name,
+                system=system_prompt,
+                messages=[{"role": "user", "content": text}],
+                temperature=0.7,
+                max_tokens=budget
+            )
+            parts = [b.text for b in response.content if getattr(b, "type", None) == "text"]
+            return "".join(parts).strip()
+            
+        except anthropic.APIStatusError as e:
+            error_msg = str(e).lower()
+            context = {"original_error": str(e)}
+            
+            if "context_length" in error_msg or "token_limit" in error_msg:
+                raise TokenLimitError(
+                    f"Input exceeds model's token limit: {str(e)}",
+                    context=context
+                )
+            elif "content_policy" in error_msg:
+                raise AIModelError(
+                    "Content was flagged by AI provider's content filter",
+                    code="CONTENT_FILTERED",
+                    context=context,
+                    suggested_action="Modify your content to comply with AI provider policies"
+                )
+            else:
+                raise AIModelError(
+                    f"Invalid request to AI service: {str(e)}",
+                    code="INVALID_REQUEST",
+                    context=context
+                )
+            
+        except anthropic.APIError as e:
+            if e.status_code == 401:
+                logger.error(f"Authentication error with Anthropic API: {str(e)}")
+                raise AuthError(
+                    "Failed to authenticate with AI service",
+                    context={"original_error": str(e)}
+                )
+            elif e.status_code == 429:
+                if attempt < max_retries - 1:
+                    logger.warning(f"Rate limit hit, retrying in {retry_delay}s...")
+                    await asyncio.sleep(retry_delay)
+                    continue
+                
+                raise RateLimitExceeded(
+                    f"Rate limit exceeded after {max_retries} attempts",
+                    context={"original_error": str(e), "attempts": max_retries, "provider": "anthropic"}
+                )
+            elif e.status_code >= 500:
+                logger.error(f"Unexpected Anthropic API error: {str(e)}")
+                raise AIServiceError(
+                    f"Unexpected AI service error: {str(e)}",
+                    context={"original_error": str(e)}
+                )
+            else:
+                logger.error(f"Unexpected Anthropic API error: {str(e)}")
+                raise AIServiceError(
+                    f"Unexpected AI service error: {str(e)}",
+                    context={"original_error": str(e)}
+                )
+        
+        except Exception as e:
+            logger.error(f"Unexpected error with Anthropic API: {str(e)}")
+            raise AIServiceError(
+                f"Unexpected AI service error: {str(e)}",
+                context={"original_error": str(e)}
+            )
+
+
+async def _generate_with_openai_circuit_breaker(
+    text: str,
+    model_name: str,
+    system_prompt: str,
+    max_retries: int = 3,
+    retry_delay: float = 1.0
+) -> str:
+    """Generate cards using OpenAI API with circuit breaker protection."""
+    
+    async def _openai_call():
+        return await _generate_with_openai(text, model_name, system_prompt, max_retries, retry_delay)
+    
+    try:
+        return await openai_circuit.call(_openai_call)
+    except CircuitBreakerOpenError:
+        raise RateLimitExceeded(
+            "OpenAI service temporarily unavailable (circuit breaker open)",
+            code="CIRCUIT_BREAKER_OPEN",
+            context={"provider": "openai", "service": "openai_circuit"},
+            suggested_action="Try again later or use a different model provider"
+        )
+
+
+async def _generate_with_anthropic_circuit_breaker(
+    text: str,
+    model_name: str,
+    system_prompt: str,
+    max_retries: int = 3,
+    retry_delay: float = 1.0
+) -> str:
+    """Generate cards using Anthropic API with circuit breaker protection."""
+    
+    async def _anthropic_call():
+        return await _generate_with_anthropic(text, model_name, system_prompt, max_retries, retry_delay)
+    
+    try:
+        return await anthropic_circuit.call(_anthropic_call)
+    except CircuitBreakerOpenError:
+        raise RateLimitExceeded(
+            "Anthropic service temporarily unavailable (circuit breaker open)",
+            code="CIRCUIT_BREAKER_OPEN",
+            context={"provider": "anthropic", "service": "anthropic_circuit"},
+            suggested_action="Try again later or use a different model provider"
+        )
+
+
+async def generate_cards_with_fallback(
+    text: str,
+    model_name: str = None,
+    system_prompt: str = None,
+    card_type: str = "qa",
+    num_cards: int = 10,
+    max_retries: int = 3,
+    retry_delay: float = 1.0
+) -> tuple[str, dict]:
+    """
+    Generate flashcards with automatic fallback on errors.
+    
+    This function attempts to generate cards using the primary model first,
+    and automatically falls back to alternative models if errors occur that
+    are likely to be resolved by switching providers or models.
+    
+    Args:
+        text: The input text to generate cards from
+        model_name: The name of the primary model to use
+        system_prompt: The system prompt to guide card generation
+        card_type: Type of flashcards to generate ("qa" or "cloze")
+        num_cards: Number of flashcards to generate
+        max_retries: Maximum number of retry attempts per model
+        retry_delay: Delay between retries in seconds
+        
+    Returns:
+        tuple: (generated_content, metadata_dict)
+            - generated_content: The raw response from the successful AI model
+            - metadata_dict: Contains "model_used", "was_fallback", "attempt_number"
+        
+    Raises:
+        AIError: If all models in the fallback chain fail
+    """
+    # Get all models to try (primary + fallbacks if enabled)
+    models_to_try = fallback_config.get_all_models_to_try(model_name or settings.DEFAULT_OPENAI_MODEL)
+    
+    last_error = None
+    
+    for attempt_number, current_model in enumerate(models_to_try, 1):
+        try:
+            logger.info(
+                f"Attempting generation with model: {current_model}",
+                extra={
+                    "attempt_number": attempt_number,
+                    "total_models_to_try": len(models_to_try),
+                    "is_fallback": attempt_number > 1,
+                    "primary_model": model_name
+                }
+            )
+            
+            # Log fallback attempt if this isn't the first model
+            if attempt_number > 1:
+                log_fallback_attempt(
+                    primary_model=models_to_try[0],
+                    fallback_model=current_model,
+                    error_type=getattr(last_error, 'category', 'unknown')
+                )
+            
+            # Attempt generation with current model
+            content = await generate_cards_with_ai(
+                text=text,
+                model_name=current_model,
+                system_prompt=system_prompt,
+                card_type=card_type,
+                num_cards=num_cards,
+                max_retries=max_retries,
+                retry_delay=retry_delay
+            )
+            
+            # Success! Log it and return
+            if attempt_number > 1:
+                log_fallback_success(
+                    primary_model=models_to_try[0],
+                    successful_model=current_model,
+                    attempt_number=attempt_number
+                )
+            
+            metadata = {
+                "model_used": current_model,
+                "was_fallback": attempt_number > 1,
+                "attempt_number": attempt_number,
+                "primary_model": models_to_try[0]
+            }
+            
+            return content, metadata
+            
+        except AIError as e:
+            last_error = e
+            
+            # Check if this error type should trigger fallback
+            if not fallback_config.should_fallback(e.category):
+                logger.info(
+                    f"Error type {e.category} does not trigger fallback, raising immediately",
+                    extra={"error_category": e.category, "model": current_model}
+                )
+                raise e
+            
+            # If this is the last model, we'll raise the error after the loop
+            if attempt_number < len(models_to_try):
+                logger.warning(
+                    f"Model {current_model} failed, trying next fallback",
+                    extra={
+                        "error_category": e.category,
+                        "error_message": str(e),
+                        "next_model": models_to_try[attempt_number] if attempt_number < len(models_to_try) else None,
+                        "attempt_number": attempt_number
                     }
-                    
-                    parts = [b.text for b in response.content if getattr(b, "type", None) == "text"]
-                    return "".join(parts).strip() + "\nOutput strictly valid JSON, no prose.", usage
-                    
-                except anthropic.APIStatusError as e:
-                    error_msg = str(e).lower()
-                    context = {"original_error": str(e)}
-                    
-                    if "context_length" in error_msg or "token_limit" in error_msg:
-                        raise TokenLimitError(
-                            f"Input exceeds model's token limit: {str(e)}",
-                            context=context
-                        )
-                    elif "content_policy" in error_msg:
-                        raise AIModelError(
-                            "Content was flagged by AI provider's content filter",
-                            code="CONTENT_FILTERED",
-                            context=context,
-                            suggested_action="Modify your content to comply with AI provider policies"
-                        )
-                    else:
-                        raise AIModelError(
-                            f"Invalid request to AI service: {str(e)}",
-                            code="INVALID_REQUEST",
-                            context=context
-                        )
-                    
-                except anthropic.APIError as e:
-                    if e.status_code == 401:
-                        logger.error(f"Authentication error with Anthropic API: {str(e)}")
-                        raise AuthError(
-                            "Failed to authenticate with AI service",
-                            context={"original_error": str(e)}
-                        )
-                    elif e.status_code == 429:
-                        if attempt < max_retries - 1:
-                            logger.warning(f"Rate limit hit, retrying in {retry_delay}s...")
-                            await asyncio.sleep(retry_delay)
-                            continue
-                        
-                        raise RateLimitExceeded(
-                            f"Rate limit exceeded after {max_retries} attempts",
-                            context={"original_error": str(e), "attempts": max_retries, "provider": "anthropic"}
-                        )
-                    elif e.status_code >= 500:
-                        logger.error(f"Unexpected Anthropic API error: {str(e)}")
-                        raise AIServiceError(
-                            f"Unexpected AI service error: {str(e)}",
-                            context={"original_error": str(e)}
-                        )
-                    else:
-                        logger.error(f"Unexpected Anthropic API error: {str(e)}")
-                        raise AIServiceError(
-                            f"Unexpected AI service error: {str(e)}",
-                            context={"original_error": str(e)}
-                        )
-                        
-                except Exception as e:
-                    logger.error(f"Unexpected error with Anthropic API: {str(e)}")
-                    raise AIServiceError(
-                        f"Unexpected AI service error: {str(e)}",
-                        context={"original_error": str(e)}
-                    )
+                )
+                continue
+            else:
+                # This was the last model in the chain
+                log_all_models_failed(
+                    primary_model=models_to_try[0],
+                    attempted_models=models_to_try
+                )
+                break
+        
+        except Exception as e:
+            # Non-AIError exceptions should not trigger fallback
+            # These are usually programming errors or unexpected system issues
+            logger.error(
+                f"Non-fallback error with model {current_model}: {str(e)}",
+                extra={"model": current_model, "error_type": type(e).__name__}
+            )
+            raise
+    
+    # If we get here, all models failed
+    if last_error:
+        # Enhance the error message to indicate all models failed
+        enhanced_error = AIServiceError(
+            f"All models in fallback chain failed. Last error: {str(last_error)}",
+            code="FALLBACK_EXHAUSTED",
+            context={
+                "attempted_models": models_to_try,
+                "primary_model": models_to_try[0],
+                "fallback_enabled": settings.ENABLE_FALLBACK,
+                "last_error_category": last_error.category,
+                "last_error": str(last_error)
+            },
+            suggested_action="Check AI provider status or try again later. Consider using a different primary model."
+        )
+        raise enhanced_error
+    else:
+        raise AIServiceError(
+            "All models failed without specific error information",
+            code="FALLBACK_EXHAUSTED_UNKNOWN",
+            context={
+                "attempted_models": models_to_try,
+                "primary_model": models_to_try[0],
+                "fallback_enabled": settings.ENABLE_FALLBACK
+            }
+        ) 

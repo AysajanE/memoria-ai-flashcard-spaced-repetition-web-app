@@ -7,7 +7,7 @@ import requests
 from app.config import settings
 import hmac
 import hashlib
-from app.core.ai_caller import generate_cards_with_ai, TokenLimitError, AIServiceError, AuthError, RateLimitExceeded, NetworkError, AIModelError
+from app.core.ai_caller import generate_cards_with_ai, generate_cards_with_fallback, TokenLimitError, AIServiceError, AuthError, RateLimitExceeded, NetworkError, AIModelError
 from app.core.text_processing import count_tokens
 from app.core.deduplication import deduplicator
 from app.schemas.responses import WebhookPayload, GenerateCardsResult, ErrorDetail, ErrorCategory
@@ -429,22 +429,53 @@ async def process_card_generation(
                 }
             )
 
-        # Initialize processor with progress callback
-        processor = ChunkedProcessor(progress_callback)
-        
-        # Process with progress tracking
-        cards, metrics = await processor.process_long_text(
-            text=input_text,
-            model=model,
-            card_type=card_type,
-            num_cards=num_cards,
-            job_id=job_id
-        )
+        # Try fallback first if enabled, otherwise use chunked processing
+        if settings.ENABLE_FALLBACK:
+            result, metadata = await generate_cards_with_fallback(
+                text=input_text,
+                model_name=model,
+                system_prompt=settings.DEFAULT_SYSTEM_PROMPT,
+                card_type=card_type,
+                num_cards=num_cards
+            )
+            actual_model = metadata["model_used"]
+            was_fallback = metadata["was_fallback"]
+            
+            # Log fallback information
+            if was_fallback:
+                logger.info(
+                    f"Fallback successful for job {job_id}",
+                    extra={
+                        "job_id": job_id,
+                        "primary_model": metadata["primary_model"],
+                        "successful_model": actual_model,
+                        "attempt_number": metadata["attempt_number"]
+                    }
+                )
+            
+            # Parse and validate AI response
+            parsed_result = parse_ai_response(result)
+            cards = parsed_result["cards"]
+            metrics = {"usage": {"total_tokens": 0}}  # Default metrics
+        else:
+            # Initialize processor with progress callback (Phase 3 chunked processing)
+            from app.core.chunked_processor import ChunkedProcessor
+            processor = ChunkedProcessor(progress_callback)
+            
+            # Process with progress tracking
+            cards, metrics = await processor.process_long_text(
+                text=input_text,
+                model=model,
+                card_type=card_type,
+                num_cards=num_cards,
+                job_id=job_id
+            )
+            actual_model = model
+            was_fallback = False
         
         # Check output token limit (use actual tokens from AI response if available)
         actual_tokens = metrics.get("usage", {}).get("total_tokens", 0)
-        output_tokens = sum(count_tokens(card["front"] + card["back"], model) for card in cards)
-        
+        output_tokens = sum(count_tokens(card["front"] + card["back"], actual_model) for card in cards)
         if output_tokens > MAX_OUTPUT_TOKENS:
             error_msg = (
                 f"Generated content exceeds maximum output token limit of {MAX_OUTPUT_TOKENS}. "
@@ -458,18 +489,28 @@ async def process_card_generation(
                 context={
                     "output_tokens": output_tokens,
                     "max_tokens": MAX_OUTPUT_TOKENS,
-                    "model": model,
+                    "model": actual_model,
+                    "requested_model": model,
+                    "was_fallback": was_fallback,
                     "card_count": len(cards)
                 }
             )
         
-        # Create result payload
+        # Create result payload (include fallback information)
         result_payload = GenerateCardsResult(
             cards=cards,
-            model=model,
+            model=actual_model,
             processingTime=time.time() - start_time,
             tokenCount=actual_tokens if actual_tokens > 0 else input_tokens + output_tokens
         )
+        
+        # Add fallback metadata if applicable
+        if was_fallback and hasattr(result_payload, '__dict__'):
+            # Add extra fields to track fallback information
+            result_payload.__dict__.update({
+                "requestedModel": model,
+                "wasFallback": was_fallback
+            })
         
         # Send completion webhook
         completion_payload = {
@@ -485,7 +526,7 @@ async def process_card_generation(
             completion_payload.update({
                 "costUSD": metrics["cost_usd"],
                 "tokensUsed": metrics["usage"]["total_tokens"],
-                "model": model
+                "model": actual_model
             })
         
         await send_webhook_async(completion_payload)

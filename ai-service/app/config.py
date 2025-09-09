@@ -83,11 +83,14 @@ class Settings(BaseSettings):
     ENABLE_COST_ACCOUNTING: bool = False
     TOKENS_PER_CARD_BUDGET: int = 128
     MIN_CARD_YIELD_RATIO: float = 0.7
+    
+    # Phase 4 Reliability Feature Flags
+    ENABLE_CIRCUIT_BREAKER: bool = False
 
-    # Concurrency & budgets  
-    OPENAI_MAX_CONCURRENCY: int = 8
-    ANTHROPIC_MAX_CONCURRENCY: int = 8
-    TOKENS_PER_CARD_BUDGET: int = 128
+    # Default System Prompt
+    DEFAULT_SYSTEM_PROMPT: str = """
+    You are an AI assistant specialized in creating effective spaced repetition flashcards to enhance learning and memory retention. Your task is to convert the provided material into a set of {num_cards} high-quality {card_type} flashcards, clearly formatted as valid JSON.
+    """
 
     # Legacy fields for backwards compatibility
     API_HOST: str = "0.0.0.0"
