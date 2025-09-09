@@ -76,6 +76,7 @@ class Settings(BaseSettings):
     # Feature Flags
     ENABLE_PROGRESS_UPDATES: bool = False
     ENABLE_CARD_RETRY: bool = True
+    ENABLE_COST_ACCOUNTING: bool = False
     TOKENS_PER_CARD_BUDGET: int = 128
     MIN_CARD_YIELD_RATIO: float = 0.7
 

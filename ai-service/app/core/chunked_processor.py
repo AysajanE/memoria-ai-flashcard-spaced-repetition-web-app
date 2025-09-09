@@ -21,7 +21,7 @@ class ChunkedProcessor:
         card_type: str,
         num_cards: int,
         job_id: str
-    ) -> List[Dict[str, Any]]:
+    ) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
         """Process long text in chunks with progress updates."""
         
         # Check if chunking is needed
@@ -31,7 +31,7 @@ class ChunkedProcessor:
         if token_count <= chunk_threshold:
             await self._update_progress(job_id, "generating", 50, "Generating cards...")
             # Use the existing generate_cards_with_ai function
-            result = await generate_cards_with_ai(
+            result, usage = await generate_cards_with_ai(
                 text=text,
                 model_name=model,
                 system_prompt=settings.DEFAULT_SYSTEM_PROMPT,
@@ -41,9 +41,14 @@ class ChunkedProcessor:
             # Parse and clean the result
             from app.core.json_parser import parse_ai_response
             from app.core.card_cleaner import card_cleaner
+            from app.core.cost_calculator import cost_calculator
             
             raw_cards = parse_ai_response(result, card_type)
-            return card_cleaner.clean_and_validate_cards(raw_cards, card_type)
+            cleaned_cards = card_cleaner.clean_and_validate_cards(raw_cards, card_type)
+            
+            # Calculate cost and return both cards and metadata
+            cost_usd = cost_calculator.calculate_cost(model, usage)
+            return cleaned_cards, {"usage": usage, "cost_usd": cost_usd}
         
         # Chunk the text
         await self._update_progress(job_id, "chunking", 10, "Splitting text into chunks...")
@@ -53,6 +58,9 @@ class ChunkedProcessor:
         chunk_allocations = self._allocate_cards_to_chunks(chunks, num_cards, model)
         
         all_cards = []
+        total_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        total_cost = 0.0
+        
         for i, (chunk, allocated_cards) in enumerate(zip(chunks, chunk_allocations)):
             if allocated_cards == 0:
                 continue
@@ -66,7 +74,7 @@ class ChunkedProcessor:
             )
             
             try:
-                chunk_result = await generate_cards_with_ai(
+                chunk_result, chunk_usage = await generate_cards_with_ai(
                     text=chunk,
                     model_name=model,
                     system_prompt=settings.DEFAULT_SYSTEM_PROMPT,
@@ -76,10 +84,20 @@ class ChunkedProcessor:
                 # Parse and clean the chunk result
                 from app.core.json_parser import parse_ai_response
                 from app.core.card_cleaner import card_cleaner
+                from app.core.cost_calculator import cost_calculator
                 
                 raw_chunk_cards = parse_ai_response(chunk_result, card_type)
                 cleaned_chunk_cards = card_cleaner.clean_and_validate_cards(raw_chunk_cards, card_type)
                 all_cards.extend(cleaned_chunk_cards)
+                
+                # Accumulate usage and cost
+                for key in total_usage:
+                    total_usage[key] += chunk_usage.get(key, 0)
+                
+                chunk_cost = cost_calculator.calculate_cost(model, chunk_usage)
+                if chunk_cost:
+                    total_cost += chunk_cost
+                    
             except Exception as e:
                 logger.warning(f"Chunk {i+1} failed: {e}", extra={"jobId": job_id})
                 continue
@@ -90,7 +108,13 @@ class ChunkedProcessor:
         
         await self._update_progress(job_id, "completed", 100, f"Generated {len(final_cards)} cards")
         
-        return final_cards
+        # Prepare metadata
+        metadata = {
+            "usage": total_usage,
+            "cost_usd": total_cost if settings.ENABLE_COST_ACCOUNTING else None
+        }
+        
+        return final_cards, metadata
     
     def _allocate_cards_to_chunks(self, chunks: List[str], total_cards: int, model: str) -> List[int]:
         """Allocate cards to chunks based on token weight."""

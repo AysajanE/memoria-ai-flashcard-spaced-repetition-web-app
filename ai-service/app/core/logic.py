@@ -402,7 +402,7 @@ async def process_card_generation(
         processor = ChunkedProcessor(progress_callback)
         
         # Process with progress tracking
-        cards = await processor.process_long_text(
+        cards, metrics = await processor.process_long_text(
             text=input_text,
             model=model,
             card_type=card_type,
@@ -410,8 +410,10 @@ async def process_card_generation(
             job_id=job_id
         )
         
-        # Check output token limit
+        # Check output token limit (use actual tokens from AI response if available)
+        actual_tokens = metrics.get("usage", {}).get("total_tokens", 0)
         output_tokens = sum(count_tokens(card["front"] + card["back"], model) for card in cards)
+        
         if output_tokens > MAX_OUTPUT_TOKENS:
             error_msg = (
                 f"Generated content exceeds maximum output token limit of {MAX_OUTPUT_TOKENS}. "
@@ -435,7 +437,7 @@ async def process_card_generation(
             cards=cards,
             model=model,
             processingTime=time.time() - start_time,
-            tokenCount=input_tokens + output_tokens
+            tokenCount=actual_tokens if actual_tokens > 0 else input_tokens + output_tokens
         )
         
         # Send completion webhook
@@ -446,6 +448,14 @@ async def process_card_generation(
             "processingTime": time.time() - start_time,
             "resultPayload": result_payload.model_dump(mode="json")
         }
+        
+        # Add cost information if enabled
+        if settings.ENABLE_COST_ACCOUNTING and metrics.get("cost_usd"):
+            completion_payload.update({
+                "costUSD": metrics["cost_usd"],
+                "tokensUsed": metrics["usage"]["total_tokens"],
+                "model": model
+            })
         
         await send_webhook_async(completion_payload)
         
