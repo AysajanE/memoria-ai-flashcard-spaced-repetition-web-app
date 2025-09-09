@@ -4,11 +4,10 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-
 def validate_configuration() -> List[str]:
     """Validate configuration and return list of warnings/errors."""
     issues = []
-
+    
     # Queue configuration
     if settings.USE_QUEUE:
         if not settings.REDIS_URL:
@@ -57,5 +56,5 @@ def log_configuration():
         "has_anthropic_key": bool(settings.ANTHROPIC_API_KEY),
         "ai_models_count": len(settings.AI_MODELS)
     }
-
+    
     logger.info("Configuration loaded", extra=config_summary)

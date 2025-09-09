@@ -6,5 +6,5 @@ requests==2.31.0
 openai==1.17.1
 anthropic==0.22.1
 tiktoken==0.6.0
-# Placeholder for AI libs - will add later
-# anthropic 
+rq>=1.15.0
+redis>=5.0.0 

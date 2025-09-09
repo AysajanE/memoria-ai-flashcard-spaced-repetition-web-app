@@ -14,8 +14,18 @@ Key Environment Variables:
   - LOG_LEVEL: Logging level, e.g., "INFO", "DEBUG", ...
 """
 
-from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field, field_validator
+try:
+    from pydantic_settings import BaseSettings, SettingsConfigDict
+    PYDANTIC_V2 = True
+except ImportError:
+    from pydantic import BaseSettings
+    PYDANTIC_V2 = False
+    
+try:
+    from pydantic import Field, field_validator
+except ImportError:
+    from pydantic import Field, validator
+
 from typing import List, Dict, Any
 import json
 import os
@@ -26,10 +36,19 @@ class Settings(BaseSettings):
 
     # Existing settings
     ENVIRONMENT: str = "development"
+    LOG_LEVEL: str = "INFO"
+
+    # API Keys and Authentication
+    INTERNAL_API_KEY: str = "test-key-for-development"
+    INTERNAL_WEBHOOK_HMAC_SECRET: str = ""
+    NEXTJS_APP_STATUS_WEBHOOK_URL: str = "http://localhost:3000/api/webhooks/ai-status"
+
+    # CORS Settings
+    CORS_ORIGINS: List[str] = ["*"]  # Allow all by default. Adjust as needed.
+
+    # AI Provider API Keys
     OPENAI_API_KEY: str = ""
     ANTHROPIC_API_KEY: str = ""
-    INTERNAL_WEBHOOK_HMAC_SECRET: str = ""
-    MAX_OUTPUT_TOKENS: int = 2048
 
     # Feature flags
     USE_QUEUE: bool = False
@@ -45,43 +64,84 @@ class Settings(BaseSettings):
 
     # Infrastructure
     REDIS_URL: str = ""
-    CORS_ORIGINS: List[str] = Field(default_factory=lambda: ["*"])
 
-    # AI Models configuration
+    # AI Model Configuration
+    # Default models to use
+    DEFAULT_OPENAI_MODEL: str = "gpt-4o-mini"
+    DEFAULT_ANTHROPIC_MODEL: str = "claude-haiku-3-5-latest"
+
+    # Optional JSON string describing additional model configurations
     AI_MODELS: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
+
+    # Token Limits
+    MAX_INPUT_TOKENS: int = 10000
+    MAX_OUTPUT_TOKENS: int = 2048
 
     # Legacy fields for backwards compatibility
     API_HOST: str = "0.0.0.0"
     API_PORT: int = 8000
-    LOG_LEVEL: str = "INFO"
-    INTERNAL_API_KEY: str
-    NEXTJS_APP_STATUS_WEBHOOK_URL: str
-    DEFAULT_OPENAI_MODEL: str = "gpt-4o-mini"
-    DEFAULT_ANTHROPIC_MODEL: str = "claude-haiku-3-5-latest"
-    MAX_INPUT_TOKENS: int = 10000
 
-    @field_validator("AI_MODELS", mode="before")
-    @classmethod
-    def parse_models(cls, v):
-        if isinstance(v, str) and v:
-            try:
-                return json.loads(v)
-            except json.JSONDecodeError:
-                return {}
-        return v or {}
+    # Validators - handle both Pydantic v1 and v2
+    if PYDANTIC_V2:
+        @field_validator("AI_MODELS", mode="before")
+        @classmethod
+        def parse_models(cls, v):
+            if isinstance(v, str) and v:
+                try:
+                    return json.loads(v)
+                except json.JSONDecodeError:
+                    return {}
+            return v or {
+                # Example fallback if not provided via env
+                "gpt-4o-mini": {
+                    "provider": "openai",
+                    "max_input_tokens": 128000,
+                    "max_output_tokens": 4096,
+                    "description": "Efficient, cost-effective OpenAI model with good performance",
+                }
+            }
 
-    @field_validator("CORS_ORIGINS", mode="before")
-    @classmethod
-    def parse_cors_origins(cls, v):
-        if isinstance(v, str):
-            return [origin.strip() for origin in v.split(",")]
-        return v
+        @field_validator("CORS_ORIGINS", mode="before")
+        @classmethod
+        def parse_cors_origins(cls, v):
+            if isinstance(v, str):
+                return [origin.strip() for origin in v.split(",")]
+            return v
 
-    model_config = SettingsConfigDict(
-        env_file=".env.local",
-        env_file_encoding="utf-8",
-        extra="ignore"
-    )
+        model_config = SettingsConfigDict(
+            env_file=".env.local",
+            env_file_encoding="utf-8",
+            extra="ignore"
+        )
+    else:
+        @validator("AI_MODELS", pre=True)
+        @classmethod
+        def parse_models(cls, v):
+            if isinstance(v, str) and v:
+                try:
+                    return json.loads(v)
+                except json.JSONDecodeError:
+                    return {}
+            return v or {
+                # Example fallback if not provided via env
+                "gpt-4o-mini": {
+                    "provider": "openai",
+                    "max_input_tokens": 128000,
+                    "max_output_tokens": 4096,
+                    "description": "Efficient, cost-effective OpenAI model with good performance",
+                }
+            }
+
+        @validator("CORS_ORIGINS", pre=True)
+        @classmethod
+        def parse_cors_origins(cls, v):
+            if isinstance(v, str):
+                return [origin.strip() for origin in v.split(",")]
+            return v
+        
+        class Config:
+            env_file = ".env.local"
+            env_file_encoding = "utf-8"
 
 # Create a singleton instance
 settings = Settings()
