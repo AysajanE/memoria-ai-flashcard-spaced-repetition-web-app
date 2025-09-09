@@ -1,14 +1,22 @@
-import { drizzle } from 'drizzle-orm/postgres-js';
-import postgres from 'postgres';
-import * as schema from './schema';
+/**
+ * @file db/index.ts
+ * @description
+ *  Drizzle client instance for Next.js app.
+ *  Connects to Postgres using "postgres" library, referencing environment variable.
+ *  Uses connection caching in development to prevent exhausting database connections.
+ */
 
-// Make sure to set DATABASE_URL in your .env.local file
+import { drizzle } from "drizzle-orm/postgres-js";
+import postgres from "postgres";
+import * as schema from "./schema";
+
 const databaseUrl = process.env.DATABASE_URL;
 
 if (!databaseUrl) {
-  throw new Error('DATABASE_URL environment variable is not set or not accessible');
+  throw new Error("DATABASE_URL environment variable is not set");
 }
 
-// Disable prefetch as it is not supported for "Transaction" pool mode
+// Initialize Postgres client with 'prepare' disabled for Transaction mode
 const client = postgres(databaseUrl, { prepare: false });
+
 export const db = drizzle(client, { schema }); 

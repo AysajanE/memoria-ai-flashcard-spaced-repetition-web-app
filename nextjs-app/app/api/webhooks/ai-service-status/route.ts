@@ -6,6 +6,9 @@ import { z } from "zod";
 import crypto from "crypto";
 import { isLegalTransition, isTerminal } from "@/lib/job-state";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 // Define error detail schema for better error handling
 const ErrorCategory = z.enum([
   "invalid_input",
