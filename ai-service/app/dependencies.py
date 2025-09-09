@@ -9,3 +9,6 @@ async def validate_internal_api_key(x_internal_api_key: str = Header(...)):
             detail="Invalid internal API Key"
         )
     return True
+
+# Alias for backward compatibility and readability
+verify_internal_api_key = validate_internal_api_key

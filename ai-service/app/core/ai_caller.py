@@ -1,6 +1,6 @@
 import logging
 import asyncio
-from typing import Optional
+from typing import Optional, List, Dict, Any
 
 from openai import AsyncOpenAI
 # Updated imports for OpenAI v1.x (aliased to avoid collisions)
@@ -81,19 +81,14 @@ class AIModelError(AIError):
     code = "MODEL_ERROR"
     suggested_action = "Try a different model or adjust parameters."
 
-# Initialize OpenAI client
-try:
-    openai_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
-except Exception as e:
-    logger.error(f"Failed to initialize OpenAI client: {str(e)}")
-    raise AIServiceError(f"Failed to initialize OpenAI client: {str(e)}")
+# Import lazy clients
+from app.core.ai_clients import get_openai_client, get_anthropic_client
+from app.core.metrics import concurrency_tracker
+from app.core.json_parser import parse_ai_response
 
-# Initialize Anthropic async client
-try:
-    anthropic_client = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
-except Exception as e:
-    logger.error(f"Failed to initialize Anthropic client: {str(e)}")
-    raise AIServiceError(f"Failed to initialize Anthropic client: {str(e)}")
+# Semaphores for concurrency control  
+openai_sem = asyncio.Semaphore(settings.OPENAI_MAX_CONCURRENCY)
+anthropic_sem = asyncio.Semaphore(settings.ANTHROPIC_MAX_CONCURRENCY)
 
 async def generate_cards_with_ai(
     text: str,
@@ -171,6 +166,63 @@ async def generate_cards_with_ai(
             context={"original_error": str(e), "error_type": type(e).__name__}
         )
 
+async def generate_cards_with_ai_parsed(
+    text: str,
+    model_name: str = None,
+    system_prompt: str = None,
+    card_type: str = "qa",
+    num_cards: int = 10,
+    max_retries: int = 3,
+    retry_delay: float = 1.0
+) -> List[Dict[str, Any]]:
+    """
+    Generate flashcards using AI APIs with improved parsing.
+    
+    Args:
+        text: The input text to generate cards from
+        model_name: The name of the model to use (if None, uses default from config)
+        system_prompt: The system prompt to guide card generation (if None, uses default)
+        card_type: Type of flashcards to generate ("qa" or "cloze")
+        num_cards: Number of flashcards to generate
+        max_retries: Maximum number of retry attempts
+        retry_delay: Delay between retries in seconds
+        
+    Returns:
+        List[Dict[str, Any]]: List of parsed flashcards
+        
+    Raises:
+        TokenLimitError: If input exceeds model's token limit
+        AIServiceError: For other AI service errors
+        ProcessingError: If response cannot be parsed
+    """
+    # Get raw response from AI
+    raw_response = await generate_cards_with_ai(
+        text=text,
+        model_name=model_name,
+        system_prompt=system_prompt,
+        card_type=card_type,
+        num_cards=num_cards,
+        max_retries=max_retries,
+        retry_delay=retry_delay
+    )
+    
+    # Parse response with improved error handling
+    cards = parse_ai_response(raw_response, card_type)
+    
+    # Determine budget based on number of cards
+    per_card_tokens = settings.TOKENS_PER_CARD_BUDGET
+    max_tokens = min(settings.MAX_OUTPUT_TOKENS, per_card_tokens * num_cards)
+    
+    # Log usage stats
+    logger.info("AI generation completed", extra={
+        "model": model_name or "default",
+        "cards_requested": num_cards,
+        "cards_generated": len(cards),
+        "max_tokens_budget": max_tokens
+    })
+    
+    return cards[:num_cards]  # Cap to requested number
+
 async def _generate_with_openai(
     text: str,
     model_name: str,
@@ -189,87 +241,91 @@ async def _generate_with_openai(
     from app.config import get_model_config as _get_cfg  # local import to avoid cycles
     budget = min(settings.MAX_OUTPUT_TOKENS, _get_cfg(model_name)["max_output_tokens"])
 
-    # Attempt API call with retries
+    # Attempt API call with retries and concurrency control
     for attempt in range(max_retries):
-        try:
-            response = await openai_client.chat.completions.create(
-                model=model_name,
-                messages=messages,
-                temperature=0.7,
-                max_tokens=budget,
-                response_format={"type": "json_object"},
-            )
-            return response.choices[0].message.content
-            
-        except BadRequestError as e:
-            error_msg = str(e).lower()
-            context = {"original_error": str(e)}
-            
-            if "maximum context length" in error_msg:
-                raise TokenLimitError(
-                    f"Input exceeds model's token limit: {str(e)}",
-                    context=context
-                )
-            elif "content filter" in error_msg:
-                raise AIModelError(
-                    "Content was flagged by AI provider's content filter",
-                    code="CONTENT_FILTERED",
-                    context=context,
-                    suggested_action="Modify your content to comply with AI provider policies"
-                )
-            else:
-                raise AIModelError(
-                    f"Invalid request to AI service: {str(e)}",
-                    code="INVALID_REQUEST",
-                    context=context
-                )
-            
-        except OpenAIAuthenticationError as e:
-            logger.error(f"Authentication error with OpenAI API: {str(e)}")
-            raise AuthError(
-                "Failed to authenticate with AI service",
-                context={"original_error": str(e)}
-            )
-            
-        except OpenAIRateLimitError as e:
-            if attempt < max_retries - 1:
-                logger.warning(f"Rate limit hit, retrying in {retry_delay}s...")
-                await asyncio.sleep(retry_delay)
-                continue
-            
-            raise RateLimitExceeded(
-                f"Rate limit exceeded after {max_retries} attempts",
-                context={"original_error": str(e), "attempts": max_retries, "provider": "openai"}
-            )
-            
-        except (APITimeoutError, APIConnectionError) as e:
-            if attempt < max_retries - 1:
-                logger.warning(f"Network error, retrying in {retry_delay}s...")
-                await asyncio.sleep(retry_delay)
-                continue
-                
-            raise NetworkError(
-                f"Network error communicating with AI service: {str(e)}",
-                context={"original_error": str(e), "attempts": max_retries}
-            )
-            
-        except OpenAIAPIError as e:
-            if e.status_code >= 500 and attempt < max_retries - 1:
-                logger.warning(f"Server error, retrying in {retry_delay}s...")
-                await asyncio.sleep(retry_delay)
-                continue
-                
-            raise AIServiceError(
-                f"Unexpected AI service error: {str(e)}",
-                context={"original_error": str(e), "status_code": e.status_code}
-            )
-            
-        except Exception as e:
-            logger.error(f"Unexpected error with OpenAI API: {str(e)}")
-            raise AIServiceError(
-                f"Unexpected AI service error: {str(e)}",
-                context={"original_error": str(e)}
-            )
+        async with concurrency_tracker.track_request("openai"):
+            async with openai_sem:
+                try:
+                    client = get_openai_client()
+                    response = await client.chat.completions.create(
+                        model=model_name,
+                        messages=messages,
+                        temperature=0.7,
+                        max_tokens=budget,
+                        response_format={"type": "json_object"},
+                        timeout=15.0
+                    )
+                    return response.choices[0].message.content
+                    
+                except BadRequestError as e:
+                    error_msg = str(e).lower()
+                    context = {"original_error": str(e)}
+                    
+                    if "maximum context length" in error_msg:
+                        raise TokenLimitError(
+                            f"Input exceeds model's token limit: {str(e)}",
+                            context=context
+                        )
+                    elif "content filter" in error_msg:
+                        raise AIModelError(
+                            "Content was flagged by AI provider's content filter",
+                            code="CONTENT_FILTERED",
+                            context=context,
+                            suggested_action="Modify your content to comply with AI provider policies"
+                        )
+                    else:
+                        raise AIModelError(
+                            f"Invalid request to AI service: {str(e)}",
+                            code="INVALID_REQUEST",
+                            context=context
+                        )
+                    
+                except OpenAIAuthenticationError as e:
+                    logger.error(f"Authentication error with OpenAI API: {str(e)}")
+                    raise AuthError(
+                        "Failed to authenticate with AI service",
+                        context={"original_error": str(e)}
+                    )
+                    
+                except OpenAIRateLimitError as e:
+                    if attempt < max_retries - 1:
+                        logger.warning(f"Rate limit hit, retrying in {retry_delay}s...")
+                        await asyncio.sleep(retry_delay)
+                        continue
+                    
+                    raise RateLimitExceeded(
+                        f"Rate limit exceeded after {max_retries} attempts",
+                        context={"original_error": str(e), "attempts": max_retries, "provider": "openai"}
+                    )
+                    
+                except (APITimeoutError, APIConnectionError) as e:
+                    if attempt < max_retries - 1:
+                        logger.warning(f"Network error, retrying in {retry_delay}s...")
+                        await asyncio.sleep(retry_delay)
+                        continue
+                        
+                    raise NetworkError(
+                        f"Network error communicating with AI service: {str(e)}",
+                        context={"original_error": str(e), "attempts": max_retries}
+                    )
+                    
+                except OpenAIAPIError as e:
+                    if e.status_code >= 500 and attempt < max_retries - 1:
+                        logger.warning(f"Server error, retrying in {retry_delay}s...")
+                        await asyncio.sleep(retry_delay)
+                        continue
+                        
+                    raise AIServiceError(
+                        f"Unexpected AI service error: {str(e)}",
+                        context={"original_error": str(e), "status_code": e.status_code}
+                    )
+                    
+                except Exception as e:
+                    logger.error(f"Unexpected error with OpenAI API: {str(e)}")
+                    raise AIServiceError(
+                        f"Unexpected AI service error: {str(e)}",
+                        context={"original_error": str(e)}
+                    )
 
 async def _generate_with_anthropic(
     text: str,
@@ -280,79 +336,83 @@ async def _generate_with_anthropic(
 ) -> str:
     """Generate cards using Anthropic API"""
     
-    # Attempt API call with retries
+    # Attempt API call with retries and concurrency control
     for attempt in range(max_retries):
-        try:
-            # Anthropic's async Messages API
-            from app.config import get_model_config as _get_cfg  # local import to avoid cycles
-            budget = min(settings.MAX_OUTPUT_TOKENS, _get_cfg(model_name)["max_output_tokens"])
+        async with concurrency_tracker.track_request("anthropic"):
+            async with anthropic_sem:
+                try:
+                    # Anthropic's async Messages API
+                    from app.config import get_model_config as _get_cfg  # local import to avoid cycles
+                    budget = min(settings.MAX_OUTPUT_TOKENS, _get_cfg(model_name)["max_output_tokens"])
 
-            response = await anthropic_client.messages.create(
-                model=model_name,
-                system=system_prompt,
-                messages=[{"role": "user", "content": text}],
-                temperature=0.7,
-                max_tokens=budget
-            )
-            parts = [b.text for b in response.content if getattr(b, "type", None) == "text"]
-            return "".join(parts).strip()
-            
-        except anthropic.APIStatusError as e:
-            error_msg = str(e).lower()
-            context = {"original_error": str(e)}
-            
-            if "context_length" in error_msg or "token_limit" in error_msg:
-                raise TokenLimitError(
-                    f"Input exceeds model's token limit: {str(e)}",
-                    context=context
-                )
-            elif "content_policy" in error_msg:
-                raise AIModelError(
-                    "Content was flagged by AI provider's content filter",
-                    code="CONTENT_FILTERED",
-                    context=context,
-                    suggested_action="Modify your content to comply with AI provider policies"
-                )
-            else:
-                raise AIModelError(
-                    f"Invalid request to AI service: {str(e)}",
-                    code="INVALID_REQUEST",
-                    context=context
-                )
-            
-        except anthropic.APIError as e:
-            if e.status_code == 401:
-                logger.error(f"Authentication error with Anthropic API: {str(e)}")
-                raise AuthError(
-                    "Failed to authenticate with AI service",
-                    context={"original_error": str(e)}
-                )
-            elif e.status_code == 429:
-                if attempt < max_retries - 1:
-                    logger.warning(f"Rate limit hit, retrying in {retry_delay}s...")
-                    await asyncio.sleep(retry_delay)
-                    continue
-                
-                raise RateLimitExceeded(
-                    f"Rate limit exceeded after {max_retries} attempts",
-                    context={"original_error": str(e), "attempts": max_retries, "provider": "anthropic"}
-                )
-            elif e.status_code >= 500:
-                logger.error(f"Unexpected Anthropic API error: {str(e)}")
-                raise AIServiceError(
-                    f"Unexpected AI service error: {str(e)}",
-                    context={"original_error": str(e)}
-                )
-            else:
-                logger.error(f"Unexpected Anthropic API error: {str(e)}")
-                raise AIServiceError(
-                    f"Unexpected AI service error: {str(e)}",
-                    context={"original_error": str(e)}
-                )
-        
-        except Exception as e:
-            logger.error(f"Unexpected error with Anthropic API: {str(e)}")
-            raise AIServiceError(
-                f"Unexpected AI service error: {str(e)}",
-                context={"original_error": str(e)}
-            ) 
+                    client = get_anthropic_client()
+                    response = await client.messages.create(
+                        model=model_name,
+                        system=system_prompt,
+                        messages=[{"role": "user", "content": text}],
+                        temperature=0.3,
+                        max_tokens=budget,
+                        timeout=15.0
+                    )
+                    parts = [b.text for b in response.content if getattr(b, "type", None) == "text"]
+                    return "".join(parts).strip() + "\nOutput strictly valid JSON, no prose."
+                    
+                except anthropic.APIStatusError as e:
+                    error_msg = str(e).lower()
+                    context = {"original_error": str(e)}
+                    
+                    if "context_length" in error_msg or "token_limit" in error_msg:
+                        raise TokenLimitError(
+                            f"Input exceeds model's token limit: {str(e)}",
+                            context=context
+                        )
+                    elif "content_policy" in error_msg:
+                        raise AIModelError(
+                            "Content was flagged by AI provider's content filter",
+                            code="CONTENT_FILTERED",
+                            context=context,
+                            suggested_action="Modify your content to comply with AI provider policies"
+                        )
+                    else:
+                        raise AIModelError(
+                            f"Invalid request to AI service: {str(e)}",
+                            code="INVALID_REQUEST",
+                            context=context
+                        )
+                    
+                except anthropic.APIError as e:
+                    if e.status_code == 401:
+                        logger.error(f"Authentication error with Anthropic API: {str(e)}")
+                        raise AuthError(
+                            "Failed to authenticate with AI service",
+                            context={"original_error": str(e)}
+                        )
+                    elif e.status_code == 429:
+                        if attempt < max_retries - 1:
+                            logger.warning(f"Rate limit hit, retrying in {retry_delay}s...")
+                            await asyncio.sleep(retry_delay)
+                            continue
+                        
+                        raise RateLimitExceeded(
+                            f"Rate limit exceeded after {max_retries} attempts",
+                            context={"original_error": str(e), "attempts": max_retries, "provider": "anthropic"}
+                        )
+                    elif e.status_code >= 500:
+                        logger.error(f"Unexpected Anthropic API error: {str(e)}")
+                        raise AIServiceError(
+                            f"Unexpected AI service error: {str(e)}",
+                            context={"original_error": str(e)}
+                        )
+                    else:
+                        logger.error(f"Unexpected Anthropic API error: {str(e)}")
+                        raise AIServiceError(
+                            f"Unexpected AI service error: {str(e)}",
+                            context={"original_error": str(e)}
+                        )
+                        
+                except Exception as e:
+                    logger.error(f"Unexpected error with Anthropic API: {str(e)}")
+                    raise AIServiceError(
+                        f"Unexpected AI service error: {str(e)}",
+                        context={"original_error": str(e)}
+                    ) 

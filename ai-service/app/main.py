@@ -5,7 +5,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.api.v1 import ai_tasks
+from app.api.v1 import ai_tasks, admin
+from app.core.ai_clients import validate_clients
 
 class JSONFormatter(logging.Formatter):
     """Custom JSON formatter for structured logging"""
@@ -81,6 +82,31 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    @app.on_event("startup")
+    async def startup_event():
+        logger = logging.getLogger(__name__)
+        
+        # Log configuration summary (without secrets)
+        config_summary = {
+            "environment": settings.ENVIRONMENT,
+            "openai_max_concurrency": settings.OPENAI_MAX_CONCURRENCY,
+            "anthropic_max_concurrency": settings.ANTHROPIC_MAX_CONCURRENCY,
+            "tokens_per_card_budget": settings.TOKENS_PER_CARD_BUDGET,
+            "cors_origins": settings.CORS_ORIGINS,
+            "has_openai_key": bool(settings.OPENAI_API_KEY),
+            "has_anthropic_key": bool(settings.ANTHROPIC_API_KEY),
+        }
+        logger.info("Configuration loaded", extra=config_summary)
+        
+        # Validate AI clients
+        try:
+            validate_clients()
+            logger.info("AI clients validated successfully")
+        except Exception as e:
+            logger.error(f"AI client validation failed: {e}")
+            if settings.ENVIRONMENT == "production":
+                raise
+
     @app.get("/")
     async def root():
         return {"message": "Welcome to Memoria AI Service"}
@@ -92,6 +118,7 @@ def create_app() -> FastAPI:
 
     # Include API routers
     app.include_router(ai_tasks.router, prefix="/api/v1", tags=["AI Tasks"])
+    app.include_router(admin.router, tags=["Admin"])
     
     return app
 
