@@ -11,6 +11,7 @@ const result = spawnSync('rg', [
   '@/app/db',
   '.',
   '--glob=!scripts/verify-no-app-db-imports.mjs',
+  '--glob=!scripts/enhanced-verify-imports.mjs',
   '--glob=!node_modules/**'
 ], { stdio: 'inherit' });
 
