@@ -6,5 +6,15 @@ requests==2.31.0
 openai==1.17.1
 anthropic==0.22.1
 tiktoken==0.6.0
+
+# Queue and Redis
 rq>=1.15.0
-redis>=5.0.0 
+redis>=5.0.0
+
+# Monitoring and Observability
+prometheus-fastapi-instrumentator>=6.1.0
+prometheus-client>=0.19.0
+sentry-sdk[fastapi]>=1.32.0
+
+# Optional dependencies for development
+colorlog>=6.7.0
