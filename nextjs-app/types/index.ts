@@ -5,31 +5,19 @@ export type ActionState<TData = undefined> = {
   data?: TData;
 };
 
+import { decks, flashcards, users } from "@/db/schema";
+
+// Database entity types (inferred from schema)
+export type Deck = typeof decks.$inferSelect;
+export type DeckInsert = typeof decks.$inferInsert;
+export type Flashcard = typeof flashcards.$inferSelect;
+export type FlashcardInsert = typeof flashcards.$inferInsert;
+export type User = typeof users.$inferSelect;
+export type UserInsert = typeof users.$inferInsert;
+
+// Legacy interface for compatibility
 export interface FlashcardData {
   front: string;
   back: string;
   type?: "qa" | "cloze";
-}
-
-export interface Deck {
-  id: string;
-  name: string;
-  userId: string;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-export interface Flashcard {
-  id: string;
-  deckId: string;
-  userId: string;
-  front: string;
-  back: string;
-  cardType: "qa" | "cloze";
-  srsLevel: number;
-  srsInterval: number;
-  srsEaseFactor: number;
-  srsDueDate: Date;
-  createdAt: Date;
-  updatedAt: Date;
 } 

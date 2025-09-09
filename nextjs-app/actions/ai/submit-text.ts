@@ -32,15 +32,7 @@ import { processingJobs } from "@/db/schema";
 import { triggerCardGeneration, FormInputSchema } from "@/lib/ai-client";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { log } from "@/lib/log";
-
-// Define ActionState locally or import from '@/types' if defined there
-// Ensure its 'error' type is: error?: Record<string, string[]> | null;
-export type ActionState<TData = any> = {
-  isSuccess: boolean;
-  message?: string;
-  data?: TData;
-  error?: Record<string, string[]> | null; // Ensure this definition matches
-};
+import { ActionState } from "@/types";
 
 export async function submitTextForCardsAction(
   formData: FormData

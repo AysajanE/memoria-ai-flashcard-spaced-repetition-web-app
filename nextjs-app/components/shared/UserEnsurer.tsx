@@ -37,7 +37,7 @@ export function UserEnsurer() {
     if (isLoaded && userId) {
       // Attempt to create or confirm the user in our DB
       // This fetch calls an API route that does the actual DB logic server-side
-      fetch("/api/auth/ensure-user")
+      fetch("/api/auth/ensure-user", { method: "POST" })
         .then((res) => {
           if (!res.ok) {
             console.error("Failed to ensure user exists in DB");

@@ -4,7 +4,7 @@ import { auth } from "@clerk/nextjs";
 import { db } from "@/db";
 import { users } from "@/db/schema";
 import { eq } from "drizzle-orm";
-import { ActionState } from "../../types";
+import { ActionState } from "@/types";
 
 export async function syncUser(
   userId: string,

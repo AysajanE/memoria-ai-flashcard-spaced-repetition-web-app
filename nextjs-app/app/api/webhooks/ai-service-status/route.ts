@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { revalidateTag } from "next/cache";
 import { db } from "@/db";
 import { processingJobs } from "@/db/schema";
 import { eq } from "drizzle-orm";
@@ -141,6 +142,14 @@ export async function POST(request: Request) {
           { status: 500 }
         );
       }
+
+      // Revalidate cache to trigger immediate UI updates
+      try {
+        revalidateTag(`job:${validatedPayload.jobId}`);
+      } catch (error) {
+        console.error("Cache revalidation failed (non-critical):", error);
+      }
+
       return NextResponse.json(
         { message: "Status updated successfully" },
         { status: 200 }

@@ -47,6 +47,8 @@ import { z } from "zod";
 import { triggerCardGeneration } from "@/lib/ai-client";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { log } from "@/lib/log";
+import { unstable_cache } from "next/cache";
+import { JobData } from "@/types/job";
 
 /**
  * Input validation schema for the user request data to this server action.
@@ -307,5 +309,67 @@ export async function getJobStatusAction(
       message: "Failed to retrieve job status",
       error: { server: ["An unexpected error occurred"] },
     };
+  }
+}
+
+/**
+ * @function getJobStatusWithCache
+ * @async
+ * @description
+ * Server-side function to fetch job status with Next.js cache tags for real-time updates.
+ * Used by Server Components to get initial data with cache revalidation support.
+ *
+ * @param jobId The ID of the job to retrieve status for
+ * @returns Promise<JobData | null> - Job data or null if not found/unauthorized
+ */
+export async function getJobStatusWithCache(jobId: string): Promise<JobData | null> {
+  const { userId } = auth();
+  if (!userId) {
+    return null;
+  }
+
+  // Use unstable_cache with job-specific tag for revalidation
+  const getCachedJob = unstable_cache(
+    async (jobId: string, userId: string) => {
+      const job = await db.query.processingJobs.findFirst({
+        where: and(
+          eq(processingJobs.id, jobId),
+          eq(processingJobs.userId, userId)
+        ),
+        columns: {
+          id: true,
+          status: true,
+          resultPayload: true,
+          errorMessage: true,
+          jobType: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      });
+
+      return job;
+    },
+    [`job-${jobId}`],
+    {
+      tags: [`job:${jobId}`],
+      revalidate: 60, // Fallback revalidation after 60 seconds
+    }
+  );
+
+  try {
+    const job = await getCachedJob(jobId, userId);
+    if (!job) {
+      return null;
+    }
+
+    return {
+      id: job.id,
+      status: job.status as JobData["status"],
+      resultPayload: job.resultPayload as JobData["resultPayload"],
+      errorMessage: job.errorMessage || undefined,
+    };
+  } catch (error) {
+    console.error("Error fetching job status with cache:", error);
+    return null;
   }
 }

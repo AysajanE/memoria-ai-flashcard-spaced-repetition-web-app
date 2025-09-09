@@ -1,14 +1,7 @@
 "use server";
 
 import { auth } from "@clerk/nextjs";
-
-// Define the ActionState type if not already defined elsewhere
-interface ActionState<T> {
-  isSuccess: boolean;
-  message?: string;
-  error?: Record<string, string[]>;
-  data?: T;
-}
+import { ActionState } from "@/types";
 
 // Define the type for user stats that matches what StatsDisplay expects
 interface UserStats {
