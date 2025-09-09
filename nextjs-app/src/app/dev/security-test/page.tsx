@@ -9,12 +9,8 @@ import {
   XSS_TEST_PAYLOADS 
 } from "@/src/lib/security-test-utils";
 
-// Only show this page in development
-if (process.env.NODE_ENV === "production") {
-  throw new Error("Security test page is not available in production");
-}
 
-export default function SecurityTestPage() {
+function SecurityTestContent() {
   const [securityReport, setSecurityReport] = useState<string>("");
   const [testPayload, setTestPayload] = useState("<script>alert('XSS Test')</script>");
   const [testResults, setTestResults] = useState<string>("");
@@ -169,4 +165,20 @@ export default function SecurityTestPage() {
       </section>
     </div>
   );
+}
+
+export default function SecurityTestPage() {
+  // Check if we're in production and show access denied if so
+  if (process.env.NODE_ENV === "production") {
+    return (
+      <div className="container mx-auto px-4 py-8">
+        <div className="bg-red-50 border-l-4 border-red-400 p-4">
+          <h1 className="text-2xl font-bold text-red-800 mb-2">Access Denied</h1>
+          <p className="text-red-700">Security test page is not available in production.</p>
+        </div>
+      </div>
+    );
+  }
+
+  return <SecurityTestContent />;
 }

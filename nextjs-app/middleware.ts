@@ -13,6 +13,7 @@ export default authMiddleware({
     "/api/webhooks/clerk",
     "/api/webhooks/ai-service-status",
     "/api/auth/ensure-user",
+    "/dev/security-test", // Dev-only security testing page
   ],
   ignoredRoutes: [
     "/((?!api|trpc))(_next.*|.+.[w]+$)",
