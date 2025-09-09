@@ -6,6 +6,16 @@ const nextConfig = {
   },
   reactStrictMode: true,
   // serverRuntimeConfig has been removed as per previous feedback
+  
+  async redirects() {
+    return [
+      {
+        source: '/landing',
+        destination: '/',
+        permanent: true,
+      },
+    ];
+  },
 };
 
 module.exports = nextConfig;

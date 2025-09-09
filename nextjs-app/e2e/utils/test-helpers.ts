@@ -45,14 +45,14 @@ export async function fillField(page: Page, selector: string, value: string) {
 /**
  * Helper to click and wait for navigation
  */
-export async function clickAndWait(page: Page, selector: string, waitForSelector?: string) {
+export async function clickAndWait(page: Page, selector: string, waitForElementSelector?: string) {
   await Promise.all([
     page.waitForLoadState('networkidle'),
     page.click(selector),
   ]);
   
-  if (waitForSelector) {
-    await waitForSelector(page, waitForSelector);
+  if (waitForElementSelector) {
+    await waitForSelector(page, waitForElementSelector);
   }
 }
 

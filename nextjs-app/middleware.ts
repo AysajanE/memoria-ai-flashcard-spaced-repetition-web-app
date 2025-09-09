@@ -7,9 +7,10 @@ import { getSecurityHeaders, shouldApplySecurityHeaders } from "@/src/lib/securi
 export default authMiddleware({
   publicRoutes: [
     "/",
-    "/landing",
-    "/sign-in",
-    "/sign-up",
+    "/sign-in(.*)",
+    "/sign-up(.*)",
+    "/articles",
+    "/articles/(.*)",
     "/api/webhooks/clerk",
     "/api/webhooks/ai-service-status",
     "/api/auth/ensure-user",
