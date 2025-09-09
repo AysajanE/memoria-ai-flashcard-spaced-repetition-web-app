@@ -1,29 +1,37 @@
-# Use an official Python runtime as a parent image
 FROM python:3.11-slim
 
-# Set the working directory in the container
+# Create non-root user
+RUN groupadd -r appgroup && useradd -r -g appgroup appuser
+
+# Set working directory
 WORKDIR /app
 
-# Install system dependencies if needed (e.g., for specific libraries)
-# RUN apt-get update && apt-get install -y --no-install-recommends \
-#     && rm -rf /var/lib/apt/lists/*
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
 
-# Copy the requirements file into the container
-COPY requirements.txt .
+# Copy requirements and install Python dependencies
+COPY requirements.txt ./
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir -r requirements.txt
 
-# Install any needed packages specified in requirements.txt
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+# Copy application code
+COPY app/ ./app/
 
-# Copy the rest of the application code into the container
-COPY ./app /app/app
+# Change ownership to non-root user
+RUN chown -R appuser:appgroup /app
 
-# Make port 80 available to the world outside this container
+# Switch to non-root user
+USER appuser
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD python -c "import requests; requests.get('http://localhost:80/health')" || exit 1
+
+# Expose port
 EXPOSE 80
 
-# Define environment variable (can be overridden)
-ENV ENVIRONMENT=production
-
-# Run uvicorn when the container launches
-# Use 0.0.0.0 to listen on all interfaces, required for Docker
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "80"] 
+# Start application with production settings
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "80", \
+     "--workers", "2", "--timeout-keep-alive", "20", "--access-log"] 
