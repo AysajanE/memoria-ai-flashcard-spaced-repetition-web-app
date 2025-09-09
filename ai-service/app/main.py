@@ -88,7 +88,7 @@ def create_app() -> FastAPI:
     @app.get("/health")
     async def health_check():
         """Health check endpoint."""
-        return {"status": "ok"}
+        return {"status": "healthy"}
 
     # Include API routers
     app.include_router(ai_tasks.router, prefix="/api/v1", tags=["AI Tasks"])
