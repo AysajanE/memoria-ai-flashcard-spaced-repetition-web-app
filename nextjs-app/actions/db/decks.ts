@@ -12,10 +12,11 @@
 import { auth } from "@clerk/nextjs";
 import { db } from "@/db";
 import { decks, flashcards, processingJobs, users } from "@/db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, count } from "drizzle-orm";
 import { ActionState } from "@/types";
 import { Deck } from "@/types";
 import { z } from "zod";
+import { revalidateTag } from "next/cache";
 
 // -------------- GET DECKS ACTION --------------
 /**
@@ -51,6 +52,57 @@ export async function getDecksAction(): Promise<ActionState<Deck[]>> {
     };
   } catch (error) {
     console.error("Error fetching decks:", error);
+    return {
+      isSuccess: false,
+      message: "Failed to fetch decks",
+    };
+  }
+}
+
+// -------------- GET DECKS WITH CARD COUNTS ACTION --------------
+/**
+ * @function getDecksWithCountsAction
+ * @async
+ * @description
+ *  Fetches all decks belonging to the current user with their card counts
+ *  in a single optimized query to avoid N+1 queries.
+ *
+ * @returns {Promise<ActionState<Array<Deck & { cardCount: number }>>>}
+ *  isSuccess: Whether the operation succeeded.
+ *  data: Array of Deck objects with cardCount if successful.
+ *  message: Error message if any issue arises.
+ */
+export async function getDecksWithCountsAction(): Promise<ActionState<Array<Deck & { cardCount: number }>>> {
+  try {
+    const { userId } = auth();
+    if (!userId) {
+      return {
+        isSuccess: false,
+        message: "Unauthorized",
+      };
+    }
+
+    // Get all decks for the user with card counts in a single query
+    const decksWithCounts = await db
+      .select({
+        id: decks.id,
+        userId: decks.userId,
+        name: decks.name,
+        createdAt: decks.createdAt,
+        updatedAt: decks.updatedAt,
+        cardCount: count(flashcards.id),
+      })
+      .from(decks)
+      .leftJoin(flashcards, eq(flashcards.deckId, decks.id))
+      .where(eq(decks.userId, userId))
+      .groupBy(decks.id, decks.userId, decks.name, decks.createdAt, decks.updatedAt);
+
+    return {
+      isSuccess: true,
+      data: decksWithCounts,
+    };
+  } catch (error) {
+    console.error("Error fetching decks with counts:", error);
     return {
       isSuccess: false,
       message: "Failed to fetch decks",
@@ -101,6 +153,9 @@ export async function createDeckAction(
         userId,
       })
       .returning({ id: decks.id });
+
+    // Revalidate the decks list cache after creating new deck
+    revalidateTag("decks-list");
 
     return {
       isSuccess: true,
@@ -248,6 +303,9 @@ export async function reviewCardsAction(
         }))
       );
 
+      // Revalidate the decks list cache after adding cards
+      revalidateTag("decks-list");
+
       return {
         isSuccess: true,
         message: `Successfully saved ${cards.length} flashcards to deck "${existingDeck.name}"`,
@@ -287,6 +345,9 @@ export async function reviewCardsAction(
           srsEaseFactor: "2.50",
         }))
       );
+
+      // Revalidate the decks list cache after creating new deck with cards
+      revalidateTag("decks-list");
 
       return {
         isSuccess: true,
