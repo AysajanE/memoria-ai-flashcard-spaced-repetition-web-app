@@ -16,7 +16,6 @@
     "db:migrate": "node -r dotenv/config ./scripts/migrate.mjs",
     "db:studio": "drizzle-kit studio"
   },
-
   "dependencies": {
     "@clerk/nextjs": "^4.29.9",
     "@paralleldrive/cuid2": "^2.2.2",
@@ -39,6 +38,7 @@
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-markdown": "^10.1.0",
+    "rehype-sanitize": "^6.0.0",
     "remark-gfm": "^4.0.1",
     "sonner": "^2.0.2",
     "svix": "^1.62.0",

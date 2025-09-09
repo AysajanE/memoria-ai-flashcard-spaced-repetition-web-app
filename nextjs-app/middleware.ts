@@ -1,8 +1,9 @@
 import { authMiddleware } from "@clerk/nextjs";
+import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
+import { getSecurityHeaders, shouldApplySecurityHeaders } from "@/src/lib/security-headers";
 
-// This example protects all routes including api/trpc routes
-// Please edit this to allow other routes to be public as needed.
-// See https://clerk.com/docs/references/nextjs/auth-middleware for more information about configuring your middleware
+// Enhanced middleware that combines Clerk authentication with security headers
 export default authMiddleware({
   publicRoutes: [
     "/",
@@ -16,6 +17,28 @@ export default authMiddleware({
   ignoredRoutes: [
     "/((?!api|trpc))(_next.*|.+.[w]+$)",
   ],
+  
+  // Apply security headers after Clerk processes the request
+  afterAuth(auth, req: NextRequest) {
+    // Get the response from Clerk's default handling
+    const response = NextResponse.next();
+    
+    // Check if we should apply security headers to this path
+    if (shouldApplySecurityHeaders(req.nextUrl.pathname)) {
+      // Determine if we're in development
+      const isDevelopment = process.env.NODE_ENV === "development";
+      
+      // Get security headers
+      const securityHeaders = getSecurityHeaders({ isDevelopment });
+      
+      // Apply security headers to the response
+      Object.entries(securityHeaders).forEach(([key, value]) => {
+        response.headers.set(key, value);
+      });
+    }
+    
+    return response;
+  },
 });
 
 export const config = {

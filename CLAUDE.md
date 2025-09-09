@@ -151,3 +151,4 @@ The SRS implementation is in `nextjs-app/src/lib/srs.ts` and uses Anki's SM-2 va
 - `nextjs-app/db/schema/`: Database schema definitions
 - `.cursorrules`: Comprehensive development guidelines and rules
 - `docs/`: Contains action plans and architecture reviews
+- Always git add and commit with descriptive message after each task.
