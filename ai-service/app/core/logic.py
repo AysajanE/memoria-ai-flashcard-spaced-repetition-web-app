@@ -1,5 +1,6 @@
 import json
 import time
+import asyncio
 import logging
 from typing import Dict, List, Any
 import requests
@@ -8,9 +9,39 @@ import hmac
 import hashlib
 from app.core.ai_caller import generate_cards_with_ai, TokenLimitError, AIServiceError, AuthError, RateLimitExceeded, NetworkError, AIModelError
 from app.core.text_processing import count_tokens
+from app.core.deduplication import deduplicator
 from app.schemas.responses import WebhookPayload, GenerateCardsResult, ErrorDetail, ErrorCategory
 
 logger = logging.getLogger(__name__)
+
+def process_job_entrypoint(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Synchronous entrypoint for RQ worker.
+    Wraps the async process_card_generation function.
+    """
+    try:
+        logger.info("Starting job processing", extra={"jobId": payload.get("jobId")})
+        
+        # Run async function in new event loop
+        result = asyncio.run(process_card_generation(
+            job_id=payload["jobId"],
+            input_text=payload["text"],
+            model=payload.get("model"),
+            card_type=payload.get("cardType", "qa"),
+            num_cards=payload.get("numCards", 10),
+            start_time=time.time()
+        ))
+        
+        logger.info("Job completed successfully", extra={"jobId": payload.get("jobId")})
+        return {"status": "completed", "result": result}
+        
+    except Exception as e:
+        logger.error(f"Job processing failed: {e}", 
+                    extra={"jobId": payload.get("jobId")}, 
+                    exc_info=True)
+        # Mark job as completed even on failure to prevent locks
+        deduplicator.mark_completed(payload.get("jobId"))
+        raise
 
 # Constants
 MAX_INPUT_TOKENS = settings.MAX_INPUT_TOKENS
@@ -439,6 +470,9 @@ async def process_card_generation(
         
         send_webhook_with_retry(webhook_payload)
         
+        # Mark job as completed on success
+        deduplicator.mark_completed(job_id)
+        
     except (TokenLimitError, ParseError, AuthError, RateLimitExceeded, 
             NetworkError, AIModelError, AIServiceError) as e:
         # Handle all our custom error types
@@ -487,6 +521,9 @@ async def process_card_generation(
         except WebhookError as webhook_err:
             # Log webhook delivery failure, but don't re-raise as we want to preserve the original error
             logger.error(f"Failed to deliver error details via webhook: {webhook_err}")
+        finally:
+            # Mark job as completed even on failure to prevent locks
+            deduplicator.mark_completed(job_id)
             
     except WebhookError as e:
         # Special handling for webhook errors when delivering successful results
@@ -527,6 +564,9 @@ async def process_card_generation(
             )
         except Exception as fallback_err:
             logger.error(f"Failed to send fallback error notification: {fallback_err}")
+        finally:
+            # Mark job as completed even on webhook failure to prevent locks
+            deduplicator.mark_completed(job_id)
             
     except Exception as e:
         # Catch-all for unexpected errors
@@ -553,4 +593,7 @@ async def process_card_generation(
         try:
             send_webhook_with_retry(webhook_payload)
         except Exception as webhook_err:
-            logger.error(f"Failed to deliver error notification: {webhook_err}") 
+            logger.error(f"Failed to deliver error notification: {webhook_err}")
+        finally:
+            # Mark job as completed even on unexpected error to prevent locks
+            deduplicator.mark_completed(job_id) 

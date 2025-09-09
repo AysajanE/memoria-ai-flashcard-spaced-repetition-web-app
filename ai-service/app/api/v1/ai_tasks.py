@@ -5,9 +5,13 @@ from typing import Dict, Any
 from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException, status, Request
 from app.dependencies import validate_internal_api_key
 from app.schemas.ai_tasks import GenerateCardsRequest
-from app.core.logic import process_card_generation
+from app.core.logic import process_card_generation, process_job_entrypoint
 from app.core.ai_caller import TokenLimitError, AIServiceError
+from app.core.deduplication import deduplicator
+from app.core.errors import ValidationError
+from app.core.error_handler import handle_error, ErrorResponse
 from app.config import settings, get_model_config
+from app.queue import q
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -95,28 +99,83 @@ async def trigger_generate_cards(request: GenerateCardsRequest, background_tasks
     logger.info(f"Received card generation request for jobId: {request.jobId}", extra={"jobId": request.jobId, "ip": client_ip})
     logger.debug(f"Input text length: {len(request.text)}", extra={"jobId": request.jobId})
     
-    # Add background task for card generation (idempotent)
-    async with _LOCK:
-        if request.jobId in _IN_FLIGHT:
-            logger.info("Duplicate job submission ignored (in-flight)", extra={"jobId": request.jobId})
-        else:
-            _IN_FLIGHT.add(request.jobId)
-            background_tasks.add_task(
-                process_ai_job,
-                request.jobId,
+    try:
+        # Validate request
+        if not request.text.strip():
+            raise ValidationError("Text content is required")
+        
+        # Check for duplicates
+        if deduplicator.is_duplicate(request.jobId):
+            return {
+                "success": True,
+                "message": "Job already in progress",
+                "jobId": request.jobId
+            }
+        
+        if settings.USE_QUEUE:
+            # Queue-based processing
+            if not deduplicator.mark_started(request.jobId):
+                return {
+                    "success": True, 
+                    "message": "Job already in progress",
+                    "jobId": request.jobId
+                }
+            
+            # Enqueue job
+            job = q.enqueue(
+                process_job_entrypoint,
                 {
+                    "jobId": request.jobId,
                     "text": request.text,
                     "model": request.model,
                     "cardType": request.cardType,
                     "numCards": request.numCards,
-                    "config": request.config
-                }
+                    "config": request.config or {}
+                },
+                job_id=request.jobId,
+                timeout=600
             )
-    
-    return {
-        "message": "Card generation request received",
-        "jobId": request.jobId
-    }
+            
+            logger.info("Job enqueued", extra={
+                "jobId": request.jobId,
+                "rq_job_id": job.id,
+                "queue_length": len(q)
+            })
+            
+        else:
+            # Background task processing (existing behavior)
+            # Add background task for card generation (idempotent)
+            async with _LOCK:
+                if request.jobId in _IN_FLIGHT:
+                    logger.info("Duplicate job submission ignored (in-flight)", extra={"jobId": request.jobId})
+                else:
+                    _IN_FLIGHT.add(request.jobId)
+                    background_tasks.add_task(
+                        process_ai_job,
+                        request.jobId,
+                        {
+                            "text": request.text,
+                            "model": request.model,
+                            "cardType": request.cardType,
+                            "numCards": request.numCards,
+                            "config": request.config
+                        }
+                    )
+        
+        return {
+            "success": True,
+            "message": "Job started successfully",
+            "jobId": request.jobId,
+            "processing_mode": "queue" if settings.USE_QUEUE else "background_task"
+        }
+        
+    except Exception as e:
+        error_response = handle_error(e, request.jobId)
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            status_code=500 if error_response.category.value == "system" else 400,
+            content=error_response.dict()
+        )
 
 @router.get("/available-models", dependencies=[Depends(validate_internal_api_key)])
 async def get_available_models():

@@ -14,8 +14,17 @@ Key Environment Variables:
   - LOG_LEVEL: Logging level, e.g., "INFO", "DEBUG", ...
 """
 
-from pydantic_settings import BaseSettings, SettingsConfigDict
+try:
+    from pydantic_settings import BaseSettings, SettingsConfigDict
+    PYDANTIC_V2 = True
+except ImportError:
+    from pydantic import BaseSettings
+    PYDANTIC_V2 = False
+    
+from pydantic import Field, validator
 from typing import List, Dict, Any
+import json
+import os
 
 
 class Settings(BaseSettings):
@@ -42,9 +51,9 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
 
     # API Keys and Authentication
-    INTERNAL_API_KEY: str
+    INTERNAL_API_KEY: str = "test-key-for-development"
     INTERNAL_WEBHOOK_HMAC_SECRET: str = ""
-    NEXTJS_APP_STATUS_WEBHOOK_URL: str
+    NEXTJS_APP_STATUS_WEBHOOK_URL: str = "http://localhost:3000/api/webhooks/ai-status"
 
     # CORS Settings
     CORS_ORIGINS: List[str] = ["*"]  # Allow all by default. Adjust as needed.
@@ -53,25 +62,57 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = ""
     ANTHROPIC_API_KEY: str = ""
 
+    # Feature flags
+    USE_QUEUE: bool = False
+    ENABLE_FALLBACK: bool = False
+    ENABLE_PROGRESS_UPDATES: bool = False
+    ENABLE_COST_ACCOUNTING: bool = False
+    ENABLE_INBOUND_HMAC: bool = False
+
+    # Concurrency & budgets
+    OPENAI_MAX_CONCURRENCY: int = 8
+    ANTHROPIC_MAX_CONCURRENCY: int = 8
+    TOKENS_PER_CARD_BUDGET: int = 128
+
+    # Infrastructure
+    REDIS_URL: str = ""
+
     # AI Model Configuration
     # Default models to use
     DEFAULT_OPENAI_MODEL: str = "gpt-4o-mini"
     DEFAULT_ANTHROPIC_MODEL: str = "claude-haiku-3-5-latest"
 
     # Optional JSON string describing additional model configurations
-    AI_MODELS: Dict[str, Dict[str, Any]] = {
-        # Example fallback if not provided via env
-        "gpt-4o-mini": {
-            "provider": "openai",
-            "max_input_tokens": 128000,
-            "max_output_tokens": 4096,
-            "description": "Efficient, cost-effective OpenAI model with good performance",
-        }
-    }
+    AI_MODELS: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
 
     # Token Limits
     MAX_INPUT_TOKENS: int = 10000
-    MAX_OUTPUT_TOKENS: int = 4096
+    MAX_OUTPUT_TOKENS: int = 2048
+
+    @validator("AI_MODELS", pre=True)
+    @classmethod
+    def parse_models(cls, v):
+        if isinstance(v, str) and v:
+            try:
+                return json.loads(v)
+            except json.JSONDecodeError:
+                return {}
+        return v or {
+            # Example fallback if not provided via env
+            "gpt-4o-mini": {
+                "provider": "openai",
+                "max_input_tokens": 128000,
+                "max_output_tokens": 4096,
+                "description": "Efficient, cost-effective OpenAI model with good performance",
+            }
+        }
+
+    @validator("CORS_ORIGINS", pre=True)
+    @classmethod
+    def parse_cors_origins(cls, v):
+        if isinstance(v, str):
+            return [origin.strip() for origin in v.split(",")]
+        return v
 
     # Default System Prompt
     DEFAULT_SYSTEM_PROMPT: str = """
@@ -136,11 +177,16 @@ class Settings(BaseSettings):
     ```
     """
 
-    model_config = SettingsConfigDict(
-        env_file=".env.local",
-        env_file_encoding="utf-8",
-        extra="ignore"
-    )
+    if PYDANTIC_V2:
+        model_config = SettingsConfigDict(
+            env_file=".env.local",
+            env_file_encoding="utf-8",
+            extra="ignore"
+        )
+    else:
+        class Config:
+            env_file = ".env.local"
+            env_file_encoding = "utf-8"
 
 # Create a singleton instance
 settings = Settings()

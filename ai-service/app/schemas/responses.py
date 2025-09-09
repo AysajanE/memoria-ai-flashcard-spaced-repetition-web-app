@@ -1,4 +1,8 @@
-from typing import List, Optional, Literal, Dict, Any
+from typing import List, Optional, Dict, Any
+try:
+    from typing import Literal
+except ImportError:
+    from typing_extensions import Literal
 from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime
 from enum import Enum
@@ -21,13 +25,13 @@ class ErrorCategory(str, Enum):
 class Card(BaseModel):
     front: str = Field(..., min_length=1, max_length=1000)
     back: str = Field(..., min_length=1, max_length=1000)
-    type: Literal["qa", "cloze"] = "qa"
+    type: str = "qa"  # qa or cloze
 
 
 class GenerateCardsResponse(BaseModel):
     """Response schema for the /generate-cards endpoint"""
     jobId: str = Field(..., description="Unique identifier for the processing job")
-    status: Literal["accepted"] = "accepted"
+    status: str = "accepted"  # accepted
     message: str = "Card generation job accepted"
 
 
@@ -46,7 +50,7 @@ class WebhookPayload(BaseModel):
     model_config = ConfigDict(json_encoders={datetime: lambda dt: dt.isoformat()})
     
     jobId: str = Field(..., description="Unique identifier for the processing job")
-    status: Literal["completed", "failed"] = Field(..., description="Final status of the job")
+    status: str = Field(..., description="Final status of the job (completed or failed)")
     resultPayload: Optional[dict] = Field(None, description="Generated cards or other results")
     errorDetail: Optional[ErrorDetail] = Field(None, description="Detailed error information if status is failed")
     errorMessage: Optional[str] = Field(None, description="Simple error message if status is failed (for backward compatibility)")

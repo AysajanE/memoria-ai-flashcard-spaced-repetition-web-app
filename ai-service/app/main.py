@@ -5,7 +5,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.api.v1 import ai_tasks
+from app.api.v1 import ai_tasks, health, admin
+from app.core.config_validator import validate_configuration, log_configuration
 
 class JSONFormatter(logging.Formatter):
     """Custom JSON formatter for structured logging"""
@@ -92,6 +93,24 @@ def create_app() -> FastAPI:
 
     # Include API routers
     app.include_router(ai_tasks.router, prefix="/api/v1", tags=["AI Tasks"])
+    app.include_router(health.router, prefix="/api/v1", tags=["Health"])
+    app.include_router(admin.router, tags=["Admin"])
+
+    @app.on_event("startup")
+    async def startup_event():
+        log_configuration()
+        issues = validate_configuration()
+        
+        for issue in issues:
+            if issue.startswith("ERROR"):
+                logging.error(issue)
+            else:
+                logging.warning(issue)
+        
+        # Fail startup if critical errors
+        errors = [i for i in issues if i.startswith("ERROR")]
+        if errors:
+            raise RuntimeError(f"Configuration errors: {', '.join(errors)}")
     
     return app
 
