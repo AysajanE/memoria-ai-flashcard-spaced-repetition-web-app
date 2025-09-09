@@ -38,9 +38,12 @@ class ChunkedProcessor:
                 card_type=card_type,
                 num_cards=num_cards
             )
-            # Parse the result (assuming it returns raw text)
-            from app.core.logic import parse_ai_response
-            return parse_ai_response(result)["cards"]
+            # Parse and clean the result
+            from app.core.json_parser import parse_ai_response
+            from app.core.card_cleaner import card_cleaner
+            
+            raw_cards = parse_ai_response(result, card_type)
+            return card_cleaner.clean_and_validate_cards(raw_cards, card_type)
         
         # Chunk the text
         await self._update_progress(job_id, "chunking", 10, "Splitting text into chunks...")
@@ -70,10 +73,13 @@ class ChunkedProcessor:
                     card_type=card_type,
                     num_cards=allocated_cards
                 )
-                # Parse the chunk result
-                from app.core.logic import parse_ai_response
-                chunk_cards = parse_ai_response(chunk_result)["cards"]
-                all_cards.extend(chunk_cards)
+                # Parse and clean the chunk result
+                from app.core.json_parser import parse_ai_response
+                from app.core.card_cleaner import card_cleaner
+                
+                raw_chunk_cards = parse_ai_response(chunk_result, card_type)
+                cleaned_chunk_cards = card_cleaner.clean_and_validate_cards(raw_chunk_cards, card_type)
+                all_cards.extend(cleaned_chunk_cards)
             except Exception as e:
                 logger.warning(f"Chunk {i+1} failed: {e}", extra={"jobId": job_id})
                 continue
