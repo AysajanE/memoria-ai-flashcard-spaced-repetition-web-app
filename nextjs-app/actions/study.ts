@@ -33,7 +33,7 @@ import { decks, flashcards, users } from "@/db/schema";
 import { and, eq, lte, asc } from "drizzle-orm";
 import { ActionState } from "@/types";
 import { z } from "zod";
-import { calculateSrsData, StudyRating } from "@/lib/srs";
+import { calculateSrsData, StudyRating, MS_PER_DAY } from "@/lib/srs";
 
 /**
  * Maximum number of cards to return for a single study session
@@ -178,8 +178,8 @@ export async function recordStudyRatingAction(
     }
 
     // At this point, we unify the logic with srs.ts
-    // We call calculateSrsData(...) to get newInterval, newEaseFactor, newDueDate
-    const { newInterval, newEaseFactor, newDueDate } = calculateSrsData(
+    // We call calculateSrsData(...) to get newInterval, newEaseFactor, newDueDate, newSrsLevel
+    const { newInterval, newEaseFactor, newDueDate, newSrsLevel } = calculateSrsData(
       card,
       rating as StudyRating
     );
@@ -227,8 +227,9 @@ export async function recordStudyRatingAction(
       // Check if the day difference is exactly 1 day => increment streak
       // Otherwise, reset streak to 1
       if (lastStudiedDayUTC) {
-        const dayDiff =
-          (todayUTC.getTime() - lastStudiedDayUTC.getTime()) / (24 * 60 * 60 * 1000);
+        const dayDiff = Math.floor(
+          (todayUTC.getTime() - lastStudiedDayUTC.getTime()) / MS_PER_DAY
+        );
 
         if (dayDiff === 1) {
           newStreak = userRec.consecutiveStudyDays + 1;
@@ -274,6 +275,7 @@ export async function recordStudyRatingAction(
       await tx
         .update(flashcards)
         .set({
+          srsLevel: newSrsLevel,
           srsInterval: newInterval,
           srsEaseFactor: newEaseFactor.toString(),
           srsDueDate: newDueDate,

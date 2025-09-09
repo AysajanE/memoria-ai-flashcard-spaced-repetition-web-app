@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { Card } from "@/components/ui/card";
 import { Flashcard } from "@/types";
 import {
@@ -53,7 +53,7 @@ export default function StudyPage({ params }: { params: { deckId: string } }) {
     loadStudySession();
   }, [params.deckId]);
 
-  const handleRating = async (rating: "again" | "hard" | "good" | "easy") => {
+  const handleRating = useCallback(async (rating: "again" | "hard" | "good" | "easy") => {
     if (!studyCards[currentCardIndex]) return;
 
     setIsRating(true);
@@ -84,7 +84,110 @@ export default function StudyPage({ params }: { params: { deckId: string } }) {
     } finally {
       setIsRating(false);
     }
-  };
+  }, [studyCards, currentCardIndex, router]);
+
+  // Keyboard shortcuts handler
+  const handleKeyPress = useCallback(
+    (event: KeyboardEvent) => {
+      // Don't trigger shortcuts if user is typing in an input field
+      const target = event.target as HTMLElement;
+      if (
+        target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.contentEditable === 'true'
+      ) {
+        return;
+      }
+
+      // Prevent shortcuts during loading states
+      if (isLoading || isRating || isSessionComplete) {
+        return;
+      }
+
+      // Only process if we have a current card
+      if (!studyCards[currentCardIndex]) {
+        return;
+      }
+
+      switch (event.key.toLowerCase()) {
+        case ' ': // Space key
+          event.preventDefault();
+          if (!isShowingAnswer) {
+            setIsShowingAnswer(true);
+            // Announce to screen readers
+            const announcement = document.createElement('div');
+            announcement.setAttribute('aria-live', 'polite');
+            announcement.setAttribute('aria-atomic', 'true');
+            announcement.className = 'sr-only';
+            announcement.textContent = 'Answer revealed. Use keys 1-4 to rate your performance.';
+            document.body.appendChild(announcement);
+            setTimeout(() => document.body.removeChild(announcement), 1000);
+          }
+          break;
+        case '1':
+          event.preventDefault();
+          if (isShowingAnswer) {
+            handleRating("again");
+            // Announce to screen readers
+            const announcement = document.createElement('div');
+            announcement.setAttribute('aria-live', 'polite');
+            announcement.className = 'sr-only';
+            announcement.textContent = 'Rated as Again';
+            document.body.appendChild(announcement);
+            setTimeout(() => document.body.removeChild(announcement), 1000);
+          }
+          break;
+        case '2':
+          event.preventDefault();
+          if (isShowingAnswer) {
+            handleRating("hard");
+            // Announce to screen readers
+            const announcement = document.createElement('div');
+            announcement.setAttribute('aria-live', 'polite');
+            announcement.className = 'sr-only';
+            announcement.textContent = 'Rated as Hard';
+            document.body.appendChild(announcement);
+            setTimeout(() => document.body.removeChild(announcement), 1000);
+          }
+          break;
+        case '3':
+          event.preventDefault();
+          if (isShowingAnswer) {
+            handleRating("good");
+            // Announce to screen readers
+            const announcement = document.createElement('div');
+            announcement.setAttribute('aria-live', 'polite');
+            announcement.className = 'sr-only';
+            announcement.textContent = 'Rated as Good';
+            document.body.appendChild(announcement);
+            setTimeout(() => document.body.removeChild(announcement), 1000);
+          }
+          break;
+        case '4':
+          event.preventDefault();
+          if (isShowingAnswer) {
+            handleRating("easy");
+            // Announce to screen readers
+            const announcement = document.createElement('div');
+            announcement.setAttribute('aria-live', 'polite');
+            announcement.className = 'sr-only';
+            announcement.textContent = 'Rated as Easy';
+            document.body.appendChild(announcement);
+            setTimeout(() => document.body.removeChild(announcement), 1000);
+          }
+          break;
+      }
+    },
+    [studyCards, currentCardIndex, isShowingAnswer, isLoading, isRating, isSessionComplete, handleRating]
+  );
+
+  // Add keyboard event listeners
+  useEffect(() => {
+    window.addEventListener('keydown', handleKeyPress);
+    return () => {
+      window.removeEventListener('keydown', handleKeyPress);
+    };
+  }, [handleKeyPress]);
 
   if (isLoading) {
     return (
@@ -215,18 +318,26 @@ export default function StudyPage({ params }: { params: { deckId: string } }) {
 
           <div className="pt-4">
             {!isShowingAnswer ? (
-              <Button
-                className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white shadow-md hover:shadow-lg transition-all border-0"
-                size="lg"
-                onClick={() => setIsShowingAnswer(true)}
-                disabled={isRating}
-              >
-                Show Answer
-              </Button>
+              <div className="space-y-3">
+                <Button
+                  className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white shadow-md hover:shadow-lg transition-all border-0"
+                  size="lg"
+                  onClick={() => setIsShowingAnswer(true)}
+                  disabled={isRating}
+                >
+                  Show Answer
+                </Button>
+                <div className="text-center text-xs text-muted-foreground">
+                  Press <kbd className="px-1.5 py-0.5 text-xs font-semibold text-gray-800 bg-gray-100 border border-gray-300 rounded-lg dark:bg-gray-600 dark:text-gray-100 dark:border-gray-500">Space</kbd> to reveal answer
+                </div>
+              </div>
             ) : (
               <div className="space-y-4">
                 <div className="text-center text-sm font-medium text-gray-600 dark:text-gray-400 mb-2">
                   How well did you know this?
+                </div>
+                <div className="text-center text-xs text-muted-foreground mb-3">
+                  Press <kbd className="px-1 py-0.5 text-xs font-semibold text-gray-800 bg-gray-100 border border-gray-300 rounded dark:bg-gray-600 dark:text-gray-100 dark:border-gray-500">1</kbd>-<kbd className="px-1 py-0.5 text-xs font-semibold text-gray-800 bg-gray-100 border border-gray-300 rounded dark:bg-gray-600 dark:text-gray-100 dark:border-gray-500">4</kbd> to rate your performance
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <Button
@@ -242,7 +353,10 @@ export default function StudyPage({ params }: { params: { deckId: string } }) {
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
                       </svg>
                     )}
-                    Again
+                    <div className="flex flex-col items-center">
+                      <span>Again</span>
+                      <span className="text-xs opacity-75">(1)</span>
+                    </div>
                   </Button>
                   <Button
                     variant="outline"
@@ -257,7 +371,10 @@ export default function StudyPage({ params }: { params: { deckId: string } }) {
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                       </svg>
                     )}
-                    Hard
+                    <div className="flex flex-col items-center">
+                      <span>Hard</span>
+                      <span className="text-xs opacity-75">(2)</span>
+                    </div>
                   </Button>
                   <Button
                     variant="outline"
@@ -272,7 +389,10 @@ export default function StudyPage({ params }: { params: { deckId: string } }) {
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 10h4.764a2 2 0 011.789 2.894l-3.5 7A2 2 0 0115.263 21h-4.017c-.163 0-.326-.02-.485-.06L7 20m7-10V5a2 2 0 00-2-2h-.095c-.5 0-.905.405-.905.905 0 .714-.211 1.412-.608 2.006L7 11v9m7-10h-2M7 20H5a2 2 0 01-2-2v-6a2 2 0 012-2h2.5" />
                       </svg>
                     )}
-                    Good
+                    <div className="flex flex-col items-center">
+                      <span>Good</span>
+                      <span className="text-xs opacity-75">(3)</span>
+                    </div>
                   </Button>
                   <Button
                     variant="outline"
@@ -287,7 +407,10 @@ export default function StudyPage({ params }: { params: { deckId: string } }) {
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                       </svg>
                     )}
-                    Easy
+                    <div className="flex flex-col items-center">
+                      <span>Easy</span>
+                      <span className="text-xs opacity-75">(4)</span>
+                    </div>
                   </Button>
                 </div>
               </div>

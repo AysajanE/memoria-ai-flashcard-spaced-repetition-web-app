@@ -2,10 +2,74 @@ import { flashcards } from "@/db/schema/flashcards";
 
 export type StudyRating = "Again" | "Hard" | "Good" | "Easy";
 
-interface SrsData {
+export interface SrsData {
   newInterval: number;
   newEaseFactor: number;
   newDueDate: Date;
+  newSrsLevel: number;
+}
+
+// Constant for milliseconds per day for accurate date calculations
+export const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/**
+ * Calculates the next review date based on interval
+ * Exported for testing purposes
+ */
+export function calculateNextReview(interval: number, baseDate: Date = new Date()): Date {
+  const dueDate = new Date(baseDate);
+  dueDate.setUTCDate(dueDate.getUTCDate() + interval);
+  return dueDate;
+}
+
+/**
+ * Calculates streak updates based on study dates
+ * Exported for testing purposes
+ */
+export function calculateStreakUpdate(
+  lastStudiedAt: Date | null,
+  currentDate: Date = new Date(),
+  currentStreak: number = 0
+): { newStreak: number; isNewDay: boolean } {
+  const todayUTC = new Date(Date.UTC(
+    currentDate.getUTCFullYear(),
+    currentDate.getUTCMonth(),
+    currentDate.getUTCDate()
+  ));
+
+  let lastStudiedDayUTC: Date | null = null;
+  if (lastStudiedAt) {
+    lastStudiedDayUTC = new Date(Date.UTC(
+      lastStudiedAt.getUTCFullYear(),
+      lastStudiedAt.getUTCMonth(),
+      lastStudiedAt.getUTCDate()
+    ));
+  }
+
+  // Check if it's a new day
+  const isSameDay = lastStudiedDayUTC
+    ? lastStudiedDayUTC.getTime() === todayUTC.getTime()
+    : false;
+
+  if (isSameDay) {
+    return { newStreak: currentStreak, isNewDay: false };
+  }
+
+  // It's a new day
+  if (lastStudiedDayUTC) {
+    const dayDiff = Math.floor(
+      (todayUTC.getTime() - lastStudiedDayUTC.getTime()) / MS_PER_DAY
+    );
+
+    if (dayDiff === 1) {
+      return { newStreak: currentStreak + 1, isNewDay: true };
+    } else {
+      return { newStreak: 1, isNewDay: true };
+    }
+  } else {
+    // If they've never studied before, set streak to 1
+    return { newStreak: 1, isNewDay: true };
+  }
 }
 
 /**
@@ -48,6 +112,7 @@ export function calculateSrsData(
   rating: StudyRating
 ): SrsData {
   const currentInterval = currentCard.srsInterval;
+  const currentSrsLevel = currentCard.srsLevel || 0;
   const currentEaseFactor =
     typeof currentCard.srsEaseFactor === "string"
       ? parseFloat(currentCard.srsEaseFactor)
@@ -65,14 +130,23 @@ export function calculateSrsData(
       Easy: 3,
     };
 
+    // Calculate new SRS level for learning phase
+    let newSrsLevel = currentSrsLevel;
+    if (rating === "Good" || rating === "Easy") {
+      newSrsLevel = Math.max(1, currentSrsLevel + 1); // Move out of learning phase
+    } else if (rating === "Again") {
+      newSrsLevel = 0; // Reset to learning phase
+    }
+    // Hard rating maintains current level in learning phase
+
     // Calculate due date with UTC to avoid timezone issues
-    const dueDate = new Date();
-    dueDate.setUTCDate(dueDate.getUTCDate() + learningIntervals[rating]);
+    const dueDate = calculateNextReview(learningIntervals[rating], now);
 
     return {
       newInterval: learningIntervals[rating],
       newEaseFactor: currentEaseFactor,
       newDueDate: dueDate,
+      newSrsLevel,
     };
   }
 
@@ -112,13 +186,22 @@ export function calculateSrsData(
       break;
   }
 
+  // Calculate new SRS level for review phase
+  let newSrsLevel = currentSrsLevel;
+  if (rating === "Good" || rating === "Easy") {
+    newSrsLevel = currentSrsLevel + 1; // Increment level for successful reviews
+  } else if (rating === "Again") {
+    newSrsLevel = 0; // Reset to learning phase
+  }
+  // Hard rating maintains current level
+
   // Calculate new due date using UTC to avoid timezone issues
-  const dueDate = new Date();
-  dueDate.setUTCDate(dueDate.getUTCDate() + newInterval);
+  const dueDate = calculateNextReview(newInterval, now);
 
   return {
     newInterval,
     newEaseFactor,
     newDueDate: dueDate,
+    newSrsLevel,
   };
 } 
