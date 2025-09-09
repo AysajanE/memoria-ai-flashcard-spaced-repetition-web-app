@@ -64,6 +64,24 @@ def create_app() -> FastAPI:
         version="0.1.0"
     )
     
+    @app.on_event("startup")
+    async def startup_event():
+        from app.core.config_validator import validate_configuration, log_configuration
+        
+        log_configuration()
+        issues = validate_configuration()
+        
+        for issue in issues:
+            if issue.startswith("ERROR"):
+                logger.error(issue)
+            else:
+                logger.warning(issue)
+        
+        # Fail startup if critical errors
+        errors = [i for i in issues if i.startswith("ERROR")]
+        if errors:
+            raise RuntimeError(f"Configuration errors: {', '.join(errors)}")
+    
     # Configure CORS
     allow_origins = settings.CORS_ORIGINS or []
     allow_credentials = True
