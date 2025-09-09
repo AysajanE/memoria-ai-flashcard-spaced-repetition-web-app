@@ -1,115 +1,187 @@
 # Memoria AI Service
 
-This is the AI service component of the Memoria flashcard application. It handles AI-powered flashcard generation and text processing using OpenAI and Anthropic models.
+Production-ready FastAPI service for AI-powered flashcard generation with Redis queuing, circuit breakers, and comprehensive observability.
 
 ## Features
 
-- Text processing and flashcard generation
-- Support for multiple AI providers (OpenAI and Anthropic)
-- Configurable model selection
-- Asynchronous job processing with webhooks for status updates
+- 🤖 Multi-provider AI support (OpenAI, Anthropic)
+- 🚀 Redis-backed job queuing with RQ
+- 🔒 HMAC request/response verification
+- 🔄 Automatic failover and circuit breakers
+- 📊 Prometheus metrics and Sentry monitoring
+- 🧪 Comprehensive test suite
+- 🐳 Production Docker configuration
 
-## AI Models
+## Quick Start
 
-Defaults (configurable via `.env.local`):
-
-- OpenAI: `gpt-4o-mini`
-- Anthropic: `claude-haiku-3-5-latest`
-
-## Configuration
-
-1. Copy `.env.example` to `.env.local` and fill in your API keys
-2. Adjust model settings as needed:
-   - `DEFAULT_OPENAI_MODEL` - The default OpenAI model to use
-   - `DEFAULT_ANTHROPIC_MODEL` - The default Anthropic model to use
-
-## API Endpoints
-
-### `/api/v1/generate-cards`
-
-Triggers flashcard generation for a given text input.
-
-**Request:**
-```json
-{
-  "jobId": "uuid-string",
-  "text": "Input text to generate cards from",
-  "model": "gpt-4o-mini",  // Optional: defaults to DEFAULT_OPENAI_MODEL if not specified
-  "cardType": "qa",        // Optional: "qa" or "cloze"
-  "numCards": 10,          // Optional: number of cards to generate
-  "config": {}             // Optional: additional configuration
-}
-```
-
-**Response:** `202 Accepted` with jobId if successful
-
-### `/api/v1/available-models`
-
-Returns information about available AI models. Protected with `X-Internal-API-Key`.
-
-**Response:**
-```json
-{
-  "models": {
-    "gpt-4o-mini": {
-      "provider": "openai",
-      "description": "Efficient, cost-effective OpenAI model",
-      "maxInputTokens": 128000,
-      "maxOutputTokens": 4096,
-      "isDefault": true
-    },
-    "claude-haiku-3-5-latest": {
-      "provider": "anthropic",
-      "description": "Fast, efficient Anthropic model",
-      "maxInputTokens": 200000,
-      "maxOutputTokens": 4096,
-      "isDefault": true
-    }
-  },
-  "defaultOpenAI": "gpt-4o-mini",
-  "defaultAnthropic": "claude-haiku-3-5-latest"
-}
-```
-
-## Development
-
-### Setup
+### Development Setup
 
 ```bash
 # Install dependencies
 pip install -r requirements.txt
+pip install -r requirements-dev.txt
 
-# Run the server
+# Start Redis
+docker-compose up redis
+
+# Configure environment
+cp .env.example .env
+# Edit .env with your API keys
+
+# Start development server
 uvicorn app.main:app --reload
+
+# Start worker (in another terminal)
+python -m workers.ai_worker
 ```
 
-### CORS & Webhook Security
+### Production Deployment
 
-- CORS: Set `CORS_ORIGINS` in `.env.local` to a list of trusted origins. When using wildcard (`*`), credentials are disabled automatically.
-- Webhook HMAC: Set `INTERNAL_WEBHOOK_HMAC_SECRET` to sign outgoing webhooks to Next.js. Next.js verifies timestamp + signature.
-
-### Adding New Models
-
-To add a new model, update the `AI_MODELS` dictionary in `app/config.py`:
-
-```python
-AI_MODELS: Dict[str, Dict[str, Any]] = {
-    "new-model-name": {
-        "provider": "openai",  # or "anthropic" or another provider
-        "max_input_tokens": 32000,
-        "max_output_tokens": 4096,
-        "description": "Description of the model"
-    },
-    # Other models...
-}
-```
-
-## Docker
-
-Build and run with Docker:
 ```bash
-docker build -t memoria-ai-service .
-docker run -p 8000:80 memoria-ai-service
+# Build and deploy with Docker Compose
+docker-compose -f docker-compose.prod.yml up -d
+
+# Scale workers as needed
+docker-compose -f docker-compose.prod.yml up -d --scale ai-worker=3
+```
+
+## Environment Variables
+
+### Required
+- `INTERNAL_API_KEY` - Shared secret for internal service communication
+- `NEXTJS_APP_STATUS_WEBHOOK_URL` - Webhook endpoint in Next.js app for job completion
+- `OPENAI_API_KEY` - OpenAI API key (optional if using only Anthropic)
+- `ANTHROPIC_API_KEY` - Anthropic API key (optional if using only OpenAI)
+
+### Optional Feature Flags
+- `USE_QUEUE=true` - Enable Redis queuing (recommended for production)
+- `ENABLE_FALLBACK=true` - Enable model fallback on errors
+- `ENABLE_PROGRESS_UPDATES=true` - Send progress webhooks for long jobs
+- `ENABLE_COST_ACCOUNTING=true` - Include cost estimates in responses
+- `ENABLE_INBOUND_HMAC=true` - Verify incoming request signatures
+
+### Scaling & Performance
+- `OPENAI_MAX_CONCURRENCY=8` - Max concurrent OpenAI requests
+- `ANTHROPIC_MAX_CONCURRENCY=8` - Max concurrent Anthropic requests
+- `TOKENS_PER_CARD_BUDGET=128` - Token budget per flashcard
+- `MAX_OUTPUT_TOKENS=4096` - Maximum output tokens per request
+
+### Infrastructure
+- `REDIS_URL=redis://localhost:6379/0` - Redis connection string
+- `CORS_ORIGINS=http://localhost:3000` - Allowed CORS origins (comma-separated)
+- `API_HOST=0.0.0.0` - Host to bind the service to
+- `API_PORT=8000` - Port to run the service on
+
+### Monitoring (Optional)
+- `SENTRY_DSN` - Sentry error tracking DSN
+- `LOG_LEVEL=INFO` - Logging level (DEBUG, INFO, WARNING, ERROR)
+- `ENABLE_METRICS=true` - Enable Prometheus metrics
+- `ENVIRONMENT=development` - Environment name (development, staging, production)
+
+## API Endpoints
+
+### Core Endpoints
+- `POST /api/v1/generate-cards` - Generate flashcards asynchronously
+- `GET /health` - Basic health check
+- `GET /ready` - Readiness check (includes dependencies)
+- `GET /metrics` - Prometheus metrics
+
+### Admin Endpoints (require `X-Internal-API-Key`)
+- `GET /api/v1/admin/queue-status` - Queue statistics
+- `GET /api/v1/admin/concurrency-stats` - AI provider concurrency
+- `GET /api/v1/admin/circuit-breaker-status` - Circuit breaker states
+- `GET /api/v1/admin/fallback-stats` - Model fallback statistics
+- `POST /api/v1/preview/cards` - Generate preview cards (no webhook)
+- `POST /api/v1/preview/tokenize` - Analyze text and chunking
+
+## Architecture
+
+### Components
+- **FastAPI Application** - HTTP API server
+- **RQ Workers** - Background job processing
+- **Redis** - Queue storage and caching
+- **AI Providers** - OpenAI and Anthropic APIs
+
+### Request Flow
+1. Client sends flashcard generation request
+2. Request validated and job queued (or background task)
+3. Worker processes job with AI provider
+4. Results sent via webhook to client
+5. Metrics and logs recorded
+
+### Reliability Features
+- **Circuit Breakers** - Prevent cascade failures to AI providers
+- **Model Fallback** - Automatic failover between AI models
+- **Request Deduplication** - Prevent duplicate processing
+- **Retry Logic** - Automatic retries with exponential backoff
+
+## Testing
+
+### Running Tests
+
+```bash
+# Unit tests
+pytest tests/ -v
+
+# Coverage report
+pytest tests/ --cov=app --cov-report=html
+
+# Integration tests only
+pytest tests/test_api_integration.py -v
+
+# Load testing
+python tests/load_test.py --scenario light
+
+# Load test with custom parameters
+python tests/load_test.py --concurrent 20 --duration 60
+```
+
+### Test Structure
+
+- `tests/test_core_functionality.py` - Unit tests for core logic
+- `tests/test_api_integration.py` - API endpoint integration tests
+- `tests/test_webhook_contracts.py` - Webhook payload validation tests
+- `tests/load_test.py` - Performance and load testing utility
+- `tests/conftest.py` - Shared test fixtures and configuration
+
+## Monitoring & Observability
+
+### Metrics
+Available at `/metrics` endpoint:
+- `ai_requests_total` - AI API request counts by provider/model/status
+- `ai_request_duration_seconds` - Request latency histograms
+- `ai_tokens_used_total` - Token consumption tracking
+- `ai_cost_usd_total` - Cost tracking by provider/model
+- `queue_size` - Current queue length
+- `circuit_breaker_state` - Circuit breaker status
+
+### Logging
+- Structured JSON logs in production
+- Request correlation via `jobId`
+- AI provider performance tracking
+- Error categorization and suggested actions
+
+## Troubleshooting
+
+### Common Issues
+
+**Queue not processing jobs**
+```bash
+# Check worker status
+docker-compose logs ai-worker
+
+# Check Redis connectivity
+redis-cli -u $REDIS_URL ping
+
+# Restart workers
+docker-compose restart ai-worker
+```
+
+**High error rates**
+```bash
+# Check circuit breaker status
+curl -H "X-Internal-API-Key: $INTERNAL_API_KEY" \
+     http://localhost:8000/api/v1/admin/circuit-breaker-status
 ```
 
 ## API Documentation
