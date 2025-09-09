@@ -73,6 +73,13 @@ class Settings(BaseSettings):
     MAX_INPUT_TOKENS: int = 10000
     MAX_OUTPUT_TOKENS: int = 4096
 
+    # Phase 4 Reliability Feature Flags
+    ENABLE_FALLBACK: bool = False
+    ENABLE_CIRCUIT_BREAKER: bool = False
+    
+    # Redis Configuration (for circuit breaker)
+    REDIS_URL: str = ""
+
     # Default System Prompt
     DEFAULT_SYSTEM_PROMPT: str = """
     You are an AI assistant specialized in creating effective spaced repetition flashcards to enhance learning and memory retention. Your task is to convert the provided material into a set of {num_cards} high-quality {card_type} flashcards, clearly formatted as valid JSON.

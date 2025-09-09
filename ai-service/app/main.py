@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.api.v1 import ai_tasks
+from app.api.v1 import ai_tasks, admin
 
 class JSONFormatter(logging.Formatter):
     """Custom JSON formatter for structured logging"""
@@ -92,6 +92,7 @@ def create_app() -> FastAPI:
 
     # Include API routers
     app.include_router(ai_tasks.router, prefix="/api/v1", tags=["AI Tasks"])
+    app.include_router(admin.router, tags=["Admin"])
     
     return app
 

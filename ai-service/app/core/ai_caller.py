@@ -18,6 +18,17 @@ from anthropic import AsyncAnthropic
 import anthropic
 
 from app.config import settings, get_model_config
+from app.core.fallback_config import (
+    fallback_config,
+    log_fallback_attempt,
+    log_fallback_success,
+    log_all_models_failed
+)
+from app.core.circuit_breaker import (
+    openai_circuit, 
+    anthropic_circuit, 
+    CircuitBreakerOpenError
+)
 
 logger = logging.getLogger(__name__)
 
@@ -141,22 +152,41 @@ async def generate_cards_with_ai(
             adjusted_prompt = adjusted_prompt.replace("{num_cards}", str(num_cards))
             
         # Choose the appropriate generation function based on the provider
-        if provider == "anthropic":
-            return await _generate_with_anthropic(
-                text=text,
-                model_name=model_name,
-                system_prompt=adjusted_prompt,
-                max_retries=max_retries,
-                retry_delay=retry_delay
-            )
-        else:  # Default to OpenAI
-            return await _generate_with_openai(
-                text=text,
-                model_name=model_name,
-                system_prompt=adjusted_prompt,
-                max_retries=max_retries,
-                retry_delay=retry_delay
-            )
+        # Use circuit breaker if enabled, otherwise use direct calls
+        if settings.ENABLE_CIRCUIT_BREAKER:
+            if provider == "anthropic":
+                return await _generate_with_anthropic_circuit_breaker(
+                    text=text,
+                    model_name=model_name,
+                    system_prompt=adjusted_prompt,
+                    max_retries=max_retries,
+                    retry_delay=retry_delay
+                )
+            else:  # Default to OpenAI
+                return await _generate_with_openai_circuit_breaker(
+                    text=text,
+                    model_name=model_name,
+                    system_prompt=adjusted_prompt,
+                    max_retries=max_retries,
+                    retry_delay=retry_delay
+                )
+        else:
+            if provider == "anthropic":
+                return await _generate_with_anthropic(
+                    text=text,
+                    model_name=model_name,
+                    system_prompt=adjusted_prompt,
+                    max_retries=max_retries,
+                    retry_delay=retry_delay
+                )
+            else:  # Default to OpenAI
+                return await _generate_with_openai(
+                    text=text,
+                    model_name=model_name,
+                    system_prompt=adjusted_prompt,
+                    max_retries=max_retries,
+                    retry_delay=retry_delay
+                )
             
     except Exception as e:
         if isinstance(e, AIError):
@@ -355,4 +385,204 @@ async def _generate_with_anthropic(
             raise AIServiceError(
                 f"Unexpected AI service error: {str(e)}",
                 context={"original_error": str(e)}
-            ) 
+            )
+
+
+async def _generate_with_openai_circuit_breaker(
+    text: str,
+    model_name: str,
+    system_prompt: str,
+    max_retries: int = 3,
+    retry_delay: float = 1.0
+) -> str:
+    """Generate cards using OpenAI API with circuit breaker protection."""
+    
+    async def _openai_call():
+        return await _generate_with_openai(text, model_name, system_prompt, max_retries, retry_delay)
+    
+    try:
+        return await openai_circuit.call(_openai_call)
+    except CircuitBreakerOpenError:
+        raise RateLimitExceeded(
+            "OpenAI service temporarily unavailable (circuit breaker open)",
+            code="CIRCUIT_BREAKER_OPEN",
+            context={"provider": "openai", "service": "openai_circuit"},
+            suggested_action="Try again later or use a different model provider"
+        )
+
+
+async def _generate_with_anthropic_circuit_breaker(
+    text: str,
+    model_name: str,
+    system_prompt: str,
+    max_retries: int = 3,
+    retry_delay: float = 1.0
+) -> str:
+    """Generate cards using Anthropic API with circuit breaker protection."""
+    
+    async def _anthropic_call():
+        return await _generate_with_anthropic(text, model_name, system_prompt, max_retries, retry_delay)
+    
+    try:
+        return await anthropic_circuit.call(_anthropic_call)
+    except CircuitBreakerOpenError:
+        raise RateLimitExceeded(
+            "Anthropic service temporarily unavailable (circuit breaker open)",
+            code="CIRCUIT_BREAKER_OPEN",
+            context={"provider": "anthropic", "service": "anthropic_circuit"},
+            suggested_action="Try again later or use a different model provider"
+        )
+
+
+async def generate_cards_with_fallback(
+    text: str,
+    model_name: str = None,
+    system_prompt: str = None,
+    card_type: str = "qa",
+    num_cards: int = 10,
+    max_retries: int = 3,
+    retry_delay: float = 1.0
+) -> tuple[str, dict]:
+    """
+    Generate flashcards with automatic fallback on errors.
+    
+    This function attempts to generate cards using the primary model first,
+    and automatically falls back to alternative models if errors occur that
+    are likely to be resolved by switching providers or models.
+    
+    Args:
+        text: The input text to generate cards from
+        model_name: The name of the primary model to use
+        system_prompt: The system prompt to guide card generation
+        card_type: Type of flashcards to generate ("qa" or "cloze")
+        num_cards: Number of flashcards to generate
+        max_retries: Maximum number of retry attempts per model
+        retry_delay: Delay between retries in seconds
+        
+    Returns:
+        tuple: (generated_content, metadata_dict)
+            - generated_content: The raw response from the successful AI model
+            - metadata_dict: Contains "model_used", "was_fallback", "attempt_number"
+        
+    Raises:
+        AIError: If all models in the fallback chain fail
+    """
+    # Get all models to try (primary + fallbacks if enabled)
+    models_to_try = fallback_config.get_all_models_to_try(model_name or settings.DEFAULT_OPENAI_MODEL)
+    
+    last_error = None
+    
+    for attempt_number, current_model in enumerate(models_to_try, 1):
+        try:
+            logger.info(
+                f"Attempting generation with model: {current_model}",
+                extra={
+                    "attempt_number": attempt_number,
+                    "total_models_to_try": len(models_to_try),
+                    "is_fallback": attempt_number > 1,
+                    "primary_model": model_name
+                }
+            )
+            
+            # Log fallback attempt if this isn't the first model
+            if attempt_number > 1:
+                log_fallback_attempt(
+                    primary_model=models_to_try[0],
+                    fallback_model=current_model,
+                    error_type=getattr(last_error, 'category', 'unknown')
+                )
+            
+            # Attempt generation with current model
+            content = await generate_cards_with_ai(
+                text=text,
+                model_name=current_model,
+                system_prompt=system_prompt,
+                card_type=card_type,
+                num_cards=num_cards,
+                max_retries=max_retries,
+                retry_delay=retry_delay
+            )
+            
+            # Success! Log it and return
+            if attempt_number > 1:
+                log_fallback_success(
+                    primary_model=models_to_try[0],
+                    successful_model=current_model,
+                    attempt_number=attempt_number
+                )
+            
+            metadata = {
+                "model_used": current_model,
+                "was_fallback": attempt_number > 1,
+                "attempt_number": attempt_number,
+                "primary_model": models_to_try[0]
+            }
+            
+            return content, metadata
+            
+        except AIError as e:
+            last_error = e
+            
+            # Check if this error type should trigger fallback
+            if not fallback_config.should_fallback(e.category):
+                logger.info(
+                    f"Error type {e.category} does not trigger fallback, raising immediately",
+                    extra={"error_category": e.category, "model": current_model}
+                )
+                raise e
+            
+            # If this is the last model, we'll raise the error after the loop
+            if attempt_number < len(models_to_try):
+                logger.warning(
+                    f"Model {current_model} failed, trying next fallback",
+                    extra={
+                        "error_category": e.category,
+                        "error_message": str(e),
+                        "next_model": models_to_try[attempt_number] if attempt_number < len(models_to_try) else None,
+                        "attempt_number": attempt_number
+                    }
+                )
+                continue
+            else:
+                # This was the last model in the chain
+                log_all_models_failed(
+                    primary_model=models_to_try[0],
+                    attempted_models=models_to_try
+                )
+                break
+        
+        except Exception as e:
+            # Non-AIError exceptions should not trigger fallback
+            # These are usually programming errors or unexpected system issues
+            logger.error(
+                f"Non-fallback error with model {current_model}: {str(e)}",
+                extra={"model": current_model, "error_type": type(e).__name__}
+            )
+            raise
+    
+    # If we get here, all models failed
+    if last_error:
+        # Enhance the error message to indicate all models failed
+        enhanced_error = AIServiceError(
+            f"All models in fallback chain failed. Last error: {str(last_error)}",
+            code="FALLBACK_EXHAUSTED",
+            context={
+                "attempted_models": models_to_try,
+                "primary_model": models_to_try[0],
+                "fallback_enabled": settings.ENABLE_FALLBACK,
+                "last_error_category": last_error.category,
+                "last_error": str(last_error)
+            },
+            suggested_action="Check AI provider status or try again later. Consider using a different primary model."
+        )
+        raise enhanced_error
+    else:
+        raise AIServiceError(
+            "All models failed without specific error information",
+            code="FALLBACK_EXHAUSTED_UNKNOWN",
+            context={
+                "attempted_models": models_to_try,
+                "primary_model": models_to_try[0],
+                "fallback_enabled": settings.ENABLE_FALLBACK
+            }
+        ) 

@@ -6,7 +6,7 @@ import requests
 from app.config import settings
 import hmac
 import hashlib
-from app.core.ai_caller import generate_cards_with_ai, TokenLimitError, AIServiceError, AuthError, RateLimitExceeded, NetworkError, AIModelError
+from app.core.ai_caller import generate_cards_with_ai, generate_cards_with_fallback, TokenLimitError, AIServiceError, AuthError, RateLimitExceeded, NetworkError, AIModelError
 from app.core.text_processing import count_tokens
 from app.schemas.responses import WebhookPayload, GenerateCardsResult, ErrorDetail, ErrorCategory
 
@@ -387,14 +387,39 @@ async def process_card_generation(
                 }
             )
 
-        # Generate cards using AI with all parameters
-        result = await generate_cards_with_ai(
-            text=input_text,
-            model_name=model,
-            system_prompt=settings.DEFAULT_SYSTEM_PROMPT,
-            card_type=card_type,
-            num_cards=num_cards
-        )
+        # Generate cards using AI with all parameters (with fallback support if enabled)
+        if settings.ENABLE_FALLBACK:
+            result, metadata = await generate_cards_with_fallback(
+                text=input_text,
+                model_name=model,
+                system_prompt=settings.DEFAULT_SYSTEM_PROMPT,
+                card_type=card_type,
+                num_cards=num_cards
+            )
+            actual_model = metadata["model_used"]
+            was_fallback = metadata["was_fallback"]
+            
+            # Log fallback information
+            if was_fallback:
+                logger.info(
+                    f"Fallback successful for job {job_id}",
+                    extra={
+                        "job_id": job_id,
+                        "primary_model": metadata["primary_model"],
+                        "successful_model": actual_model,
+                        "attempt_number": metadata["attempt_number"]
+                    }
+                )
+        else:
+            result = await generate_cards_with_ai(
+                text=input_text,
+                model_name=model,
+                system_prompt=settings.DEFAULT_SYSTEM_PROMPT,
+                card_type=card_type,
+                num_cards=num_cards
+            )
+            actual_model = model
+            was_fallback = False
         
         # Log the raw response for debugging
         logger.debug(f"Raw AI response for job {job_id}: {result[:500]}...")
@@ -402,8 +427,8 @@ async def process_card_generation(
         # Parse and validate AI response
         parsed_result = parse_ai_response(result)
         
-        # Check output token limit
-        output_tokens = sum(count_tokens(card["front"] + card["back"], model) for card in parsed_result["cards"])
+        # Check output token limit (using actual model used)
+        output_tokens = sum(count_tokens(card["front"] + card["back"], actual_model) for card in parsed_result["cards"])
         if output_tokens > MAX_OUTPUT_TOKENS:
             error_msg = (
                 f"Generated content exceeds maximum output token limit of {MAX_OUTPUT_TOKENS}. "
@@ -417,18 +442,28 @@ async def process_card_generation(
                 context={
                     "output_tokens": output_tokens,
                     "max_tokens": MAX_OUTPUT_TOKENS,
-                    "model": model,
+                    "model": actual_model,
+                    "requested_model": model,
+                    "was_fallback": was_fallback,
                     "card_count": len(parsed_result["cards"])
                 }
             )
         
-        # Create result payload
+        # Create result payload (include fallback information)
         result_payload = GenerateCardsResult(
             cards=parsed_result["cards"],
-            model=model,
+            model=actual_model,
             processingTime=time.time() - start_time,
             tokenCount=input_tokens + output_tokens
         )
+        
+        # Add fallback metadata if applicable
+        if was_fallback and hasattr(result_payload, '__dict__'):
+            # Add extra fields to track fallback information
+            result_payload.__dict__.update({
+                "requestedModel": model,
+                "wasFallback": was_fallback
+            })
         
         # Create and send webhook payload
         webhook_payload = WebhookPayload(
