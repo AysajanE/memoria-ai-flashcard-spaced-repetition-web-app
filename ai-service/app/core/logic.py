@@ -394,10 +394,21 @@ async def process_card_generation(
     model: str,
     card_type: str = "qa",
     num_cards: int = 10,
+    config: Dict[str, Any] = None,
     start_time: float = None
-) -> None:
-    """Process card generation with more control over card type and count"""
+) -> Dict[str, Any]:
+    """Main card generation with progress tracking."""
     start_time = start_time or time.time()
+    config = config or {}
+    
+    # Import webhook sender
+    from app.core.webhook_sender import send_webhook_async
+    from app.core.chunked_processor import ChunkedProcessor
+    
+    async def progress_callback(payload):
+        """Callback to send progress updates."""
+        if settings.ENABLE_PROGRESS_UPDATES:
+            await send_webhook_async(payload)
     
     try:
         # Check input token limit
@@ -418,23 +429,22 @@ async def process_card_generation(
                 }
             )
 
-        # Generate cards using AI with all parameters
-        result = await generate_cards_with_ai(
+        # Initialize processor with progress callback
+        processor = ChunkedProcessor(progress_callback)
+        
+        # Process with progress tracking
+        cards, metrics = await processor.process_long_text(
             text=input_text,
-            model_name=model,
-            system_prompt=settings.DEFAULT_SYSTEM_PROMPT,
+            model=model,
             card_type=card_type,
-            num_cards=num_cards
+            num_cards=num_cards,
+            job_id=job_id
         )
         
-        # Log the raw response for debugging
-        logger.debug(f"Raw AI response for job {job_id}: {result[:500]}...")
+        # Check output token limit (use actual tokens from AI response if available)
+        actual_tokens = metrics.get("usage", {}).get("total_tokens", 0)
+        output_tokens = sum(count_tokens(card["front"] + card["back"], model) for card in cards)
         
-        # Parse and validate AI response
-        parsed_result = parse_ai_response(result)
-        
-        # Check output token limit
-        output_tokens = sum(count_tokens(card["front"] + card["back"], model) for card in parsed_result["cards"])
         if output_tokens > MAX_OUTPUT_TOKENS:
             error_msg = (
                 f"Generated content exceeds maximum output token limit of {MAX_OUTPUT_TOKENS}. "
@@ -449,26 +459,38 @@ async def process_card_generation(
                     "output_tokens": output_tokens,
                     "max_tokens": MAX_OUTPUT_TOKENS,
                     "model": model,
-                    "card_count": len(parsed_result["cards"])
+                    "card_count": len(cards)
                 }
             )
         
         # Create result payload
         result_payload = GenerateCardsResult(
-            cards=parsed_result["cards"],
+            cards=cards,
             model=model,
             processingTime=time.time() - start_time,
-            tokenCount=input_tokens + output_tokens
+            tokenCount=actual_tokens if actual_tokens > 0 else input_tokens + output_tokens
         )
         
-        # Create and send webhook payload
-        webhook_payload = WebhookPayload(
-            jobId=job_id,
-            status="completed",
-            resultPayload=result_payload.model_dump(mode="json")
-        )
+        # Send completion webhook
+        completion_payload = {
+            "jobId": job_id,
+            "status": "completed",
+            "cards": cards,
+            "processingTime": time.time() - start_time,
+            "resultPayload": result_payload.model_dump(mode="json")
+        }
         
-        send_webhook_with_retry(webhook_payload)
+        # Add cost information if enabled
+        if settings.ENABLE_COST_ACCOUNTING and metrics.get("cost_usd"):
+            completion_payload.update({
+                "costUSD": metrics["cost_usd"],
+                "tokensUsed": metrics["usage"]["total_tokens"],
+                "model": model
+            })
+        
+        await send_webhook_async(completion_payload)
+        
+        return {"cards": cards, "status": "completed"}
         
         # Mark job as completed on success
         deduplicator.mark_completed(job_id)
@@ -517,8 +539,14 @@ async def process_card_generation(
         
         # Send the error details to the frontend via webhook
         try:
-            send_webhook_with_retry(webhook_payload)
-        except WebhookError as webhook_err:
+            error_payload = {
+                "jobId": job_id,
+                "status": "failed",
+                "errorDetail": error_detail.model_dump(mode="json"),
+                "errorMessage": str(e)
+            }
+            await send_webhook_async(error_payload)
+        except Exception as webhook_err:
             # Log webhook delivery failure, but don't re-raise as we want to preserve the original error
             logger.error(f"Failed to deliver error details via webhook: {webhook_err}")
         finally:
@@ -581,19 +609,19 @@ async def process_card_generation(
             suggestedAction="Please try again or contact support if the issue persists."
         )
         
-        # Create webhook payload with error information
-        webhook_payload = WebhookPayload(
-            jobId=job_id,
-            status="failed",
-            errorDetail=error_detail,
-            errorMessage=f"An unexpected error occurred: {str(e)}"
-        )
-        
-        # Try to send the error details
+        # Send error notification
         try:
-            send_webhook_with_retry(webhook_payload)
+            error_payload = {
+                "jobId": job_id,
+                "status": "failed",
+                "errorDetail": error_detail.model_dump(mode="json"),
+                "errorMessage": f"An unexpected error occurred: {str(e)}"
+            }
+            await send_webhook_async(error_payload)
         except Exception as webhook_err:
             logger.error(f"Failed to deliver error notification: {webhook_err}")
         finally:
             # Mark job as completed even on unexpected error to prevent locks
-            deduplicator.mark_completed(job_id) 
+            deduplicator.mark_completed(job_id)
+        
+        raise

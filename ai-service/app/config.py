@@ -76,6 +76,13 @@ class Settings(BaseSettings):
     # Token Limits
     MAX_INPUT_TOKENS: int = 10000
     MAX_OUTPUT_TOKENS: int = 4096
+    
+    # Feature Flags
+    ENABLE_PROGRESS_UPDATES: bool = False
+    ENABLE_CARD_RETRY: bool = True
+    ENABLE_COST_ACCOUNTING: bool = False
+    TOKENS_PER_CARD_BUDGET: int = 128
+    MIN_CARD_YIELD_RATIO: float = 0.7
 
     # Concurrency & budgets  
     OPENAI_MAX_CONCURRENCY: int = 8

@@ -39,17 +39,33 @@ class ErrorDetail(BaseModel):
     suggestedAction: Optional[str] = Field(None, description="Suggested action to resolve the error")
 
 
+class ProgressPayload(BaseModel):
+    """Schema for progress updates during processing"""
+    jobId: str = Field(..., description="Unique identifier for the processing job")
+    status: Literal["in_progress"] = "in_progress"
+    phase: str = Field(..., description="Current processing phase")
+    progressPct: int = Field(..., ge=0, le=100, description="Progress percentage (0-100)")
+    message: Optional[str] = Field(None, description="Progress message")
+
+
 class WebhookPayload(BaseModel):
     jobId: str = Field(..., description="Unique identifier for the processing job")
-    status: str = Field(..., description="Final status of the job (completed, failed, or in_progress)")
+    status: Literal["completed", "failed", "in_progress"] = Field(..., description="Status of the job")
     
-    # Success fields (from foundations - backward compatible)
-    cards: Optional[List[dict]] = None
-    
-    # Enhanced fields (from durability)
+    # Success fields
     resultPayload: Optional[dict] = Field(None, description="Generated cards or other results")
+    cards: Optional[List[dict]] = Field(None, description="Direct access to cards for compatibility")
+    processingTime: Optional[float] = Field(None, description="Processing time in seconds")
+    
+    # Progress fields
+    phase: Optional[str] = Field(None, description="Current processing phase")
+    progressPct: Optional[int] = Field(None, ge=0, le=100, description="Progress percentage (0-100)")
+    message: Optional[str] = Field(None, description="Progress or status message")
+    
+    # Error fields (existing)
     errorDetail: Optional[ErrorDetail] = Field(None, description="Detailed error information if status is failed")
     errorMessage: Optional[str] = Field(None, description="Simple error message if status is failed (for backward compatibility)")
+    
     completedAt: datetime = Field(default_factory=datetime.utcnow)
     
     # Error fields (backward compatible)

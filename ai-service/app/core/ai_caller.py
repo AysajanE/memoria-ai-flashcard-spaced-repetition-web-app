@@ -98,7 +98,7 @@ async def generate_cards_with_ai(
     num_cards: int = 10,
     max_retries: int = 3,
     retry_delay: float = 1.0
-) -> str:
+) -> tuple[str, dict]:
     """
     Generate flashcards using AI APIs (OpenAI or Anthropic) with retry logic and error handling.
     
@@ -112,7 +112,7 @@ async def generate_cards_with_ai(
         retry_delay: Delay between retries in seconds
         
     Returns:
-        str: The raw response from the AI model
+        tuple[str, dict]: The raw response from the AI model and usage information
         
     Raises:
         TokenLimitError: If input exceeds model's token limit
@@ -229,7 +229,7 @@ async def _generate_with_openai(
     system_prompt: str,
     max_retries: int = 3,
     retry_delay: float = 1.0
-) -> str:
+) -> tuple[str, dict]:
     """Generate cards using OpenAI API"""
     # Prepare messages
     messages = [
@@ -255,7 +255,15 @@ async def _generate_with_openai(
                         response_format={"type": "json_object"},
                         timeout=15.0
                     )
-                    return response.choices[0].message.content
+                    
+                    # Extract usage information
+                    usage = {
+                        "prompt_tokens": response.usage.prompt_tokens,
+                        "completion_tokens": response.usage.completion_tokens,
+                        "total_tokens": response.usage.total_tokens
+                    }
+                    
+                    return response.choices[0].message.content, usage
                     
                 except BadRequestError as e:
                     error_msg = str(e).lower()
@@ -333,7 +341,7 @@ async def _generate_with_anthropic(
     system_prompt: str,
     max_retries: int = 3,
     retry_delay: float = 1.0
-) -> str:
+) -> tuple[str, dict]:
     """Generate cards using Anthropic API"""
     
     # Attempt API call with retries and concurrency control
@@ -354,8 +362,16 @@ async def _generate_with_anthropic(
                         max_tokens=budget,
                         timeout=15.0
                     )
+                    
+                    # Extract usage information
+                    usage = {
+                        "prompt_tokens": response.usage.input_tokens,
+                        "completion_tokens": response.usage.output_tokens,
+                        "total_tokens": response.usage.input_tokens + response.usage.output_tokens
+                    }
+                    
                     parts = [b.text for b in response.content if getattr(b, "type", None) == "text"]
-                    return "".join(parts).strip() + "\nOutput strictly valid JSON, no prose."
+                    return "".join(parts).strip() + "\nOutput strictly valid JSON, no prose.", usage
                     
                 except anthropic.APIStatusError as e:
                     error_msg = str(e).lower()
@@ -415,4 +431,4 @@ async def _generate_with_anthropic(
                     raise AIServiceError(
                         f"Unexpected AI service error: {str(e)}",
                         context={"original_error": str(e)}
-                    ) 
+                    )

@@ -75,6 +75,7 @@ async def process_ai_job(job_id: str, input_data: Dict[str, Any]) -> None:
             model=model,
             card_type=card_type,
             num_cards=num_cards,
+            config=input_data.get("config", {}),
             start_time=time.time()
         )
 

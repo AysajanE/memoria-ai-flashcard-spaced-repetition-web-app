@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.api.v1 import ai_tasks, health, admin
+from app.api.v1 import ai_tasks, health, preview, admin
 from app.core.config_validator import validate_configuration, log_configuration
 from app.core.ai_clients import validate_clients
 
@@ -95,6 +95,7 @@ def create_app() -> FastAPI:
     # Include API routers
     app.include_router(ai_tasks.router, prefix="/api/v1", tags=["AI Tasks"])
     app.include_router(health.router, prefix="/api/v1", tags=["Health"])
+    app.include_router(preview.router)
     app.include_router(admin.router, tags=["Admin"])
 
     @app.on_event("startup")
