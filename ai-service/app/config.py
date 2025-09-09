@@ -72,6 +72,10 @@ class Settings(BaseSettings):
     # Token Limits
     MAX_INPUT_TOKENS: int = 10000
     MAX_OUTPUT_TOKENS: int = 4096
+    
+    # Feature Flags
+    ENABLE_PROGRESS_UPDATES: bool = False
+    TOKENS_PER_CARD_BUDGET: int = 128
 
     # Default System Prompt
     DEFAULT_SYSTEM_PROMPT: str = """
