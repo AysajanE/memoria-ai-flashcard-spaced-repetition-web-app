@@ -67,7 +67,7 @@ class Settings(BaseSettings):
 
     # AI Model Configuration
     # Default models to use
-    DEFAULT_OPENAI_MODEL: str = "gpt-4o-mini"
+    DEFAULT_OPENAI_MODEL: str = "gpt-5-mini"
     DEFAULT_ANTHROPIC_MODEL: str = "claude-haiku-3-5-latest"
 
     # Optional JSON string describing additional model configurations
