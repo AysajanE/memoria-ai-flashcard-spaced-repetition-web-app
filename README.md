@@ -1,148 +1,76 @@
-# Memoria - AI-Powered Flashcard Creation with Spaced Repetition
+# Memoria: AI Flashcard Creation with Spaced Repetition
 
-Memoria is an application that helps you create flashcards from your learning materials using AI, and then study them with a spaced repetition system (SRS) for efficient memorization.
+Memoria is a full-stack learning product that turns source material into flashcards and then helps users review those cards with a spaced-repetition workflow.
 
-## Project Structure
+This repository is more than a quick demo. It combines product design, full-stack application logic, an AI generation service, and study-system mechanics in one codebase.
 
-The project consists of two main parts:
+## Architecture
 
-1. **Next.js Web Application** (`/nextjs-app`): The frontend and main application logic
-2. **AI Service** (`/ai-service`): A Python FastAPI service for AI-powered flashcard generation
+The project has two main application surfaces:
 
-### Key Features
+- `nextjs-app/`: the main web application built with Next.js, TypeScript, Clerk, and Drizzle
+- `ai-service/`: a Python FastAPI service responsible for AI-assisted flashcard generation
 
-- **AI-Powered Flashcard Generation**: Convert your notes and texts into well-structured flashcards
-- **Spaced Repetition**: Study cards using an optimized algorithm based on the Anki SM-2 variant (implementation in `/nextjs-app/src/lib/srs.ts`)
-- **Progress Tracking**: Track your learning progress with detailed statistics
-- **Educational Content**: Access articles about spaced repetition and effective learning techniques
+Supporting materials live in:
 
-## Getting Started
+- `docs/`: implementation plans, reviews, and design notes
+- root workspace files: monorepo wiring, shared scripts, and local development helpers
 
-## Environment Configuration
+## Product capabilities
 
-### Required Environment Variables
+- AI-assisted flashcard generation from notes and study material
+- deck and card workflows for organizing learning content
+- spaced-repetition scheduling for review sessions
+- user accounts and progress tracking
+- authenticated web application flows
+- testable separation between frontend application logic and AI processing logic
 
-Copy `.env.example` to `.env.local` in the `nextjs-app` directory and configure:
+## Tech stack
 
-#### Authentication (Clerk)
-```bash
-NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY="pk_test_..."
-CLERK_SECRET_KEY="sk_test_..."
-CLERK_WEBHOOK_SECRET="whsec_..." # For user creation webhooks
-```
+- Next.js + React + TypeScript
+- Python + FastAPI
+- Clerk authentication
+- PostgreSQL + Drizzle ORM
+- Playwright / Vitest / service-side test tooling
 
-#### Database
-```bash
-DATABASE_URL="postgresql://user:pass@host:5432/memoria_db"
-```
+## Local development
 
-#### AI Service Integration
-```bash
-AI_SERVICE_BASE_URL="http://localhost:8000"  # Python service URL
-INTERNAL_API_KEY="your-secure-api-key"       # Shared secret
-INTERNAL_WEBHOOK_HMAC_SECRET="hmac-secret"   # Webhook signing (optional but recommended)
-```
-
-#### Rate Limiting (Production)
-```bash
-REDIS_URL="redis://localhost:6379"           # For Redis rate limiting
-UPSTASH_REDIS_REST_URL="https://..."         # Alternative for Vercel/serverless
-UPSTASH_REDIS_REST_TOKEN="token..."          # Upstash auth token
-```
-
-#### Application URLs
-```bash
-NEXT_PUBLIC_APP_URL="https://your-domain.com" # Production URL for webhooks
-```
-
-#### File Storage (Optional)
-```bash
-NEXT_PUBLIC_SUPABASE_URL="https://xxx.supabase.co"
-SUPABASE_SERVICE_KEY="service-role-key"
-UPLOADS_BUCKET_NAME="uploads-bucket"
-```
-
-### Security Headers
-
-The application includes comprehensive security headers:
-- Content Security Policy (CSP)
-- HSTS (HTTP Strict Transport Security) 
-- X-Frame-Options, X-Content-Type-Options
-- CSRF protection via SameSite cookies
-
-Configure CSP domains in production via `NEXT_PUBLIC_APP_URL`.
-
-### Cache Tags Strategy
-
-The application uses Next.js cache tags for granular invalidation:
-- `user-{userId}` - User-specific data
-- `deck-{deckId}` - Individual deck data
-- `cards-{deckId}` - Cards belonging to a deck
-- `processing-job-{jobId}` - AI processing status
-
-Cache invalidation happens automatically on data mutations through Server Actions.
-
-### Running the Next.js Application
-
-The Next.js application is now consolidated in the `/nextjs-app` directory:
+At the repo root:
 
 ```bash
-cd nextjs-app
 npm install
-npm run dev
 ```
 
-### Running the AI Service
+Run the frontend:
+
+```bash
+npm run dev:next
+```
+
+Run the AI service:
 
 ```bash
 cd ai-service
 pip install -r requirements.txt
-python -m app.main
+python -m uvicorn app.main:app --reload
 ```
 
-## Architecture
+Environment setup starts from the checked-in `.env.example` files in the root, `nextjs-app/`, and `ai-service/`.
 
-### Tech Stack
+## Why this repo matters
 
-- **Frontend**: Next.js with React and TypeScript
-- **Authentication**: Clerk
-- **Database**: PostgreSQL with Drizzle ORM
-- **AI Processing**: Python FastAPI service using OpenAI/Claude APIs
-  - Synchronized type definitions between frontend and backend
-  - Configurable card generation (type, count, model)
-  - Comprehensive error handling with categorization and suggestions
+For portfolio purposes, Memoria shows:
 
-### Database Schema
+- product thinking rather than just model experimentation
+- full-stack implementation across web, API, auth, and data layers
+- a concrete AI use case with operational boundaries between application code and model-serving code
 
-The application uses several related tables:
-- Users: Store user accounts and study statistics
-- Decks: Organize flashcards into topic-based collections
-- Flashcards: Store the actual cards with SRS metadata (interval, ease factor, due date)
-- Processing Jobs: Track AI processing operations
+## Suggested review path
 
-The canonical schema is defined in `/nextjs-app/db/schema` and is accessible via:
-- Direct import from `/nextjs-app/db/schema`
+If you want the fastest tour of the repo, start with:
 
-## Development
-
-### Database Migrations
-
-```bash
-cd nextjs-app
-npm run db:generate
-npm run db:migrate
-```
-
-### Linting and Formatting
-
-```bash
-cd nextjs-app
-npm run lint
-npm run format
-```
-
-## Documentation
-
-- [Detailed Implementation Plan](./docs/nextjs_detailed_implementation_plan.md) - Step-by-step implementation guide
-- [Action Plan](./docs/nextjs_action_plan_v1.md) - High-level roadmap and phases
-- [Expert Review](./docs/nextjs_review_v1.md) - Architecture analysis and recommendations
+1. `README.md`
+2. `nextjs-app/README.md`
+3. `ai-service/README.md`
+4. `nextjs-app/package.json`
+5. `ai-service/pyproject.toml`
